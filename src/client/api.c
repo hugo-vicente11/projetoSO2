@@ -16,6 +16,11 @@ static char global_notif_pipe_path[MAX_PIPE_PATH_LENGTH];
 int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
                 char const *server_pipe_path, char const *notif_pipe_path,
                 int *notif_pipe) {
+  // Remover pipes existentes
+  unlink(req_pipe_path);
+  unlink(resp_pipe_path);
+  unlink(notif_pipe_path);
+
   if (mkfifo(req_pipe_path, 0666) == -1 || mkfifo(resp_pipe_path, 0666) == -1 || mkfifo(notif_pipe_path, 0666) == -1) {
     perror("Failed to create named pipes");
     return 1;

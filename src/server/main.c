@@ -443,6 +443,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  unlink(register_pipe_path);
+
   if (mkfifo(register_pipe_path, 0666) == -1) {
     perror("Failed to create register pipe");
     return 1;
