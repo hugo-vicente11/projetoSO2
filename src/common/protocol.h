@@ -10,7 +10,6 @@ enum {
   OP_CODE_DISCONNECT,
   OP_CODE_SUBSCRIBE,
   OP_CODE_UNSUBSCRIBE,
-  // TODO mais opcodes para cada operacao
 };
 
 #endif // COMMON_PROTOCOL_H

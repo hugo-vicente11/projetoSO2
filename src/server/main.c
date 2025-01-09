@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include "src/common/protocol.h"
 #include "src/common/constants.h"
@@ -16,8 +18,6 @@
 #include "io.h"
 #include "operations.h"
 #include "parser.h"
-#include "pthread.h"
-
 
 struct SharedData {
   DIR *dir;
@@ -31,6 +31,8 @@ struct SessionData {
   char notif_pipe_path[40];
   int active;
   pthread_t thread;
+  char subscribed_keys[MAX_NUMBER_SUB][MAX_STRING_SIZE];
+  int num_subscribed_keys;
 };
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -73,6 +75,27 @@ static int entry_files(const char *dir, struct dirent *entry, char *in_path,
   return 0;
 }
 
+void notify_clients(const char *key, const char *value) {
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if (sessions[i].active) {
+      for (int j = 0; j < sessions[i].num_subscribed_keys; j++) {
+        if (strcmp(sessions[i].subscribed_keys[j], key) == 0) {
+          int notif_fd = open(sessions[i].notif_pipe_path, O_WRONLY);
+          if (notif_fd != -1) {
+            char message[2 * 41];
+            snprintf(message, 41, "%s", key);
+            snprintf(message + 41, 41, "%s", value);
+            if (write(notif_fd, message, sizeof(message)) == -1) {
+              perror("Failed to write notification");
+            }
+            close(notif_fd);
+          }
+        }
+      }
+    }
+  }
+}
+
 static int run_job(int in_fd, int out_fd, char *filename) {
   size_t file_backups = 0;
   while (1) {
@@ -92,6 +115,11 @@ static int run_job(int in_fd, int out_fd, char *filename) {
 
       if (kvs_write(num_pairs, keys, values)) {
         write_str(STDERR_FILENO, "Failed to write pair\n");
+      } else {
+        // Notificar clientes após a escrita bem-sucedida
+        for (size_t i = 0; i < num_pairs; i++) {
+          notify_clients(keys[i], values[i]);
+        }
       }
       break;
 
@@ -120,6 +148,11 @@ static int run_job(int in_fd, int out_fd, char *filename) {
 
       if (kvs_delete(num_pairs, keys, out_fd)) {
         write_str(STDERR_FILENO, "Failed to delete pair\n");
+      } else {
+        // Notificar clientes após a exclusão bem-sucedida
+        for (size_t i = 0; i < num_pairs; i++) {
+          notify_clients(keys[i], "DELETED");
+        }
       }
       break;
 
@@ -187,12 +220,15 @@ static void *handle_session(void *arg) {
   struct SessionData *session = (struct SessionData *)arg;
   int req_fd = open(session->req_pipe_path, O_RDONLY);
   int resp_fd = open(session->resp_pipe_path, O_WRONLY);
+  int notif_fd = open(session->notif_pipe_path, O_WRONLY);
 
-  if (req_fd == -1 || resp_fd == -1) {
+  if (req_fd == -1 || resp_fd == -1 || notif_fd == -1) {
     perror("Failed to open session pipes");
     session->active = 0;
     return NULL;
   }
+
+  session->num_subscribed_keys = 0;
 
   char buffer[41];
   while (session->active) {
@@ -211,10 +247,12 @@ static void *handle_session(void *arg) {
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
-      // Implementar lógica de subscrição
-      // Aqui você deve adicionar a lógica para lidar com a subscrição
-      // Exemplo: adicionar a chave a uma lista de chaves subscritas
-      // Se a subscrição for bem-sucedida, definir response[1] para 0
+      // Adicionar a chave à lista de chaves subscritas
+      if (session->num_subscribed_keys < MAX_NUMBER_SUB) {
+        strncpy(session->subscribed_keys[session->num_subscribed_keys], key, MAX_STRING_SIZE);
+        session->num_subscribed_keys++;
+        response[1] = 0; // Success
+      }
 
       break;
     }
@@ -224,10 +262,17 @@ static void *handle_session(void *arg) {
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
-      // Implementar lógica de cancelamento de subscrição
-      // Aqui você deve adicionar a lógica para lidar com o cancelamento de subscrição
-      // Exemplo: remover a chave de uma lista de chaves subscritas
-      // Se o cancelamento for bem-sucedido, definir response[1] para 0
+      // Remover a chave da lista de chaves subscritas
+      for (int i = 0; i < session->num_subscribed_keys; i++) {
+        if (strcmp(session->subscribed_keys[i], key) == 0) {
+          for (int j = i; j < session->num_subscribed_keys - 1; j++) {
+            strncpy(session->subscribed_keys[j], session->subscribed_keys[j + 1], MAX_STRING_SIZE);
+          }
+          session->num_subscribed_keys--;
+          response[1] = 0; // Success
+          break;
+        }
+      }
 
       break;
     }
@@ -249,8 +294,10 @@ static void *handle_session(void *arg) {
 
   close(req_fd);
   close(resp_fd);
+  close(notif_fd);
   return NULL;
 }
+
 
 static void *get_file(void *arguments) {
   struct SharedData *thread_data = (struct SharedData *)arguments;
