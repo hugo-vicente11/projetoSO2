@@ -7,17 +7,29 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
+#include "src/common/protocol.h"
+#include "src/common/constants.h"
 #include "constants.h"
 #include "io.h"
 #include "operations.h"
 #include "parser.h"
 #include "pthread.h"
 
+
 struct SharedData {
   DIR *dir;
   char *dir_name;
   pthread_mutex_t directory_mutex;
+};
+
+struct SessionData {
+  char req_pipe_path[40];
+  char resp_pipe_path[40];
+  char notif_pipe_path[40];
+  int active;
+  pthread_t thread;
 };
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -27,6 +39,7 @@ size_t active_backups = 0; // Number of active backups
 size_t max_backups;        // Maximum allowed simultaneous backups
 size_t max_threads;        // Maximum allowed simultaneous threads
 char *jobs_directory = NULL;
+struct SessionData sessions[MAX_SESSION_COUNT];
 
 int filter_job_files(const struct dirent *entry) {
   const char *dot = strrchr(entry->d_name, '.');
@@ -169,7 +182,45 @@ static int run_job(int in_fd, int out_fd, char *filename) {
   }
 }
 
-// frees arguments
+static void *handle_session(void *arg) {
+  struct SessionData *session = (struct SessionData *)arg;
+  int req_fd = open(session->req_pipe_path, O_RDONLY);
+  int resp_fd = open(session->resp_pipe_path, O_WRONLY);
+
+  if (req_fd == -1 || resp_fd == -1) {
+    perror("Failed to open session pipes");
+    session->active = 0;
+    return NULL;
+  }
+
+  char buffer[41];
+  while (session->active) {
+    if (read(req_fd, buffer, sizeof(buffer)) <= 0) {
+      perror("Failed to read from request pipe");
+      break;
+    }
+
+    switch (buffer[0]) {
+    case OP_CODE_SUBSCRIBE:
+      // Handle subscribe
+      break;
+    case OP_CODE_UNSUBSCRIBE:
+      // Handle unsubscribe
+      break;
+    case OP_CODE_DISCONNECT:
+      session->active = 0;
+      break;
+    default:
+      fprintf(stderr, "Unknown operation code\n");
+      break;
+    }
+  }
+
+  close(req_fd);
+  close(resp_fd);
+  return NULL;
+}
+
 static void *get_file(void *arguments) {
   struct SharedData *thread_data = (struct SharedData *)arguments;
   DIR *dir = thread_data->dir;
@@ -276,27 +327,24 @@ static void dispatch_threads(DIR *dir) {
 }
 
 int main(int argc, char **argv) {
-  if (argc < 4) {
+  if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
     write_str(STDERR_FILENO, argv[0]);
-    write_str(STDERR_FILENO, " <jobs_dir>");
-    write_str(STDERR_FILENO, " <max_threads>");
-    write_str(STDERR_FILENO, " <max_backups> \n");
+    write_str(STDERR_FILENO, " <jobs_dir> <max_threads> <max_backups> <register_pipe_path>\n");
     return 1;
   }
 
   jobs_directory = argv[1];
+  char *register_pipe_path = argv[4];
 
   char *endptr;
   max_backups = strtoul(argv[3], &endptr, 10);
-
   if (*endptr != '\0') {
     fprintf(stderr, "Invalid max_proc value\n");
     return 1;
   }
 
   max_threads = strtoul(argv[2], &endptr, 10);
-
   if (*endptr != '\0') {
     fprintf(stderr, "Invalid max_threads value\n");
     return 1;
@@ -317,6 +365,17 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (mkfifo(register_pipe_path, 0666) == -1) {
+    perror("Failed to create register pipe");
+    return 1;
+  }
+
+  int register_fd = open(register_pipe_path, O_RDONLY);
+  if (register_fd == -1) {
+    perror("Failed to open register pipe");
+    return 1;
+  }
+
   DIR *dir = opendir(argv[1]);
   if (dir == NULL) {
     fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
@@ -325,10 +384,55 @@ int main(int argc, char **argv) {
 
   dispatch_threads(dir);
 
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    sessions[i].active = 0;
+  }
+
+  while (1) {
+    char req_pipe_path[40], resp_pipe_path[40], notif_pipe_path[40];
+    char buffer[1 + 3 * 40];
+    if (read(register_fd, buffer, sizeof(buffer)) <= 0) {
+      perror("Failed to read from register pipe");
+      continue;
+    }
+
+    if (buffer[0] == OP_CODE_CONNECT) {
+      strncpy(req_pipe_path, buffer + 1, 40);
+      strncpy(resp_pipe_path, buffer + 41, 40);
+      strncpy(notif_pipe_path, buffer + 81, 40);
+
+      int session_index = -1;
+      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (!sessions[i].active) {
+          session_index = i;
+          break;
+        }
+      }
+
+      if (session_index == -1) {
+        fprintf(stderr, "No available sessions\n");
+        continue;
+      }
+
+      strncpy(sessions[session_index].req_pipe_path, req_pipe_path, 40);
+      strncpy(sessions[session_index].resp_pipe_path, resp_pipe_path, 40);
+      strncpy(sessions[session_index].notif_pipe_path, notif_pipe_path, 40);
+      sessions[session_index].active = 1;
+
+      if (pthread_create(&sessions[session_index].thread, NULL, handle_session, &sessions[session_index]) != 0) {
+        perror("Failed to create session thread");
+        sessions[session_index].active = 0;
+      }
+    }
+  }
+
   if (closedir(dir) == -1) {
     fprintf(stderr, "Failed to close directory\n");
     return 0;
   }
+
+  close(register_fd);
+  unlink(register_pipe_path);
 
   while (active_backups > 0) {
     wait(NULL);

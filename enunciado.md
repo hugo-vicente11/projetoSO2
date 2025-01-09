@@ -260,24 +260,133 @@ desassociando-os das tarefas a que estão associados, estas tarefas vão depois 
 próximos clientes.
 Quando os pipes do servidor fecharem ao receber o sinal, o cliente deverá terminar.
 
-### Ponto de partida.
 
-Para resolver a 2ª parte do projeto, os grupos podem optar por usar como base a sua
-solução da 1ª parte do projeto ou aceder ao novo código base. Caso se opte por usar a
-solução da 1ª parte do projeto como ponto de partida, poder-se-á aproveitar a lógica de
-sincronização entre tarefas.
+# Arquitetura do Sistema IST-KVS
 
-### Submissão e avaliação
+Este documento descreve a arquitetura representada na imagem, detalhando os componentes, fluxos de operação e sugestões de implementação para um sistema em C.
 
-A submissão é feita através do Fénix **até ao dia 13 de Janeiro às 23h**.
-Os alunos devem submeter um ficheiro no formato zip com o código fonte e o ficheiro
-Makefile. O arquivo submetido não deve incluir outros ficheiros (tais como binários). Além
-disso, o comando make clean deve limpar todos os ficheiros resultantes da compilação do
-projeto.
-Recomendamos que os alunos se assegurem que o projeto compila/corre corretamente no
-cluster _sigma_. Ao avaliar os projetos submetidos, em caso de dúvida sobre o funcionamento
-do código submetido, os docentes usarão o _cluster_ sigma para fazer a validação final.
-O uso de outros ambientes para o desenvolvimento/teste do projeto (e.g., macOS,
-Windows/WSL) é permitido, mas o corpo docente não dará apoio técnico a dúvidas
-relacionadas especificamente com esses ambientes.
-A avaliação será feita de acordo com o método de avaliação descrito no site da cadeira.
+---
+
+## **Componentes do Sistema**
+
+### **1. Ficheiros pasta jobs**
+- Representado por um ícone de base de dados no canto superior direito.
+- Armazena os ficheiros associados às tarefas.
+- Fonte de dados inicial para o processamento do sistema.
+
+### **2. Pool de Tarefas que Lêem Ficheiros**
+- Conjunto de threads responsáveis por ler os ficheiros armazenados na "Ficheiros pasta jobs".
+- Processa os dados iniciais e os repassa para as outras camadas do sistema.
+- Cada tarefa neste pool funciona como um thread independente.
+
+### **3. Tarefa Anfitriã**
+- Representada por um bloco verde no centro do diagrama.
+- Atua como controlador principal, coordenando interações entre:
+  - **Pool de Tarefas que Lêem Ficheiros**
+  - **Pool de Tarefas Gestoras**
+  - As filas de comunicação (FIFOs).
+
+### **4. Pool de Tarefas Gestoras**
+- Representado por um bloco azul.
+- Conjunto de threads responsáveis pela execução das operações principais.
+- Realiza o processamento dos pedidos recebidos pelos clientes de forma assíncrona e simultânea.
+- Cada thread neste pool fica responsável por atender aos pedidos (e.g., `subscribe`, `unsubscribe`, `disconnect`) de um cliente que se tenha registado:
+  - Lendo da sua **FIFO de Pedido**.
+  - Escrevendo na sua **FIFO de Resposta**.
+- O número total de threads gestoras será igual ao número máximo de sessões simultâneas que o servidor permite. Por exemplo:
+  - Caso seja imposto um limite, pode-se configurar até 8 threads gestoras.
+
+---
+
+## **Estrutura de Comunicação (FIFOs)**
+
+### **1. FIFO de Pedido**
+- Cada cliente se comunica com o sistema através de uma FIFO de pedido.
+- Os pedidos são enviados para o **Pool de Tarefas Gestoras** para processamento.
+
+### **2. FIFO de Resposta**
+- As respostas dos pedidos processados são enviadas de volta aos clientes por FIFOs dedicadas.
+
+### **3. FIFO de Notificações**
+- Canal para as tarefas notificarem o sistema ou os clientes sobre:
+  - Progresso
+  - Conclusão de tarefas
+
+### **4. FIFO de Registo**
+- Representado por um bloco verde na lateral do diagrama.
+- Usado para registrar informações do sistema, como:
+  - Logs das tarefas
+  - Dados de depuração
+
+---
+
+## **Fluxo de Operações**
+
+1. **Entrada de Dados**:
+   - Os ficheiros são lidos pela **Pool de Tarefas que Lêem Ficheiros**.
+   - Os dados lidos são extraídos e enviados para a **Tarefa Anfitriã**.
+
+2. **Distribuição de Tarefas**:
+   - A **Tarefa Anfitriã** distribui os dados para o **Pool de Tarefas Gestoras**.
+
+3. **Processamento e Respostas**:
+   - Os clientes enviam pedidos ao sistema através das **FIFOs de Pedido**.
+   - As tarefas gestoras processam os pedidos e enviam as respostas via **FIFOs de Resposta**.
+
+4. **Notificações**:
+   - Informações sobre progresso ou conclusão das tarefas são enviadas através das **FIFOs de Notificações**.
+
+5. **Registo**:
+   - Logs e informações de depuração são armazenados na **FIFO de Registo**.
+
+---
+
+## **Estrutura do Cliente**
+
+- O cliente utiliza **apenas duas threads** para comunicação e processamento:
+  1. **Thread 1**:
+     - Lê comandos do `stdin`.
+     - Envia os comandos ao servidor.
+     - Recebe a resposta e apresenta o resultado no `stdout`.
+  2. **Thread 2**:
+     - Lê da **FIFO de Notificações**.
+     - Imprime as notificações recebidas no `stdout`.
+
+---
+
+## **Sugestões para Implementação em C**
+
+### **1. Threads**
+- Utilize `pthread` para implementar:
+  - **Pool de Tarefas que Lêem Ficheiros**
+  - **Pool de Tarefas Gestoras**
+  - Threads específicas no cliente.
+
+### **2. Comunicação com FIFOs**
+- Use named pipes (`mkfifo`) para implementar as filas de comunicação (FIFOs).
+
+### **3. Sincronização**
+- Utilize mutexes e semáforos (`pthread_mutex` e `sem_t`) para sincronizar o acesso às FIFOs e evitar condições de corrida.
+
+### **4. Estruturas de Dados**
+- Defina estruturas claras para:
+  - **Pedidos**
+  - **Respostas**
+  - **Notificações**
+- Certifique-se de que as FIFOs manipulem os dados de maneira consistente.
+
+### **5. Logs e FIFO de Registo**
+- Configure uma thread dedicada para processar os logs enviados à FIFO de Registo.
+
+### **6. Configuração do Pool de Tarefas Gestoras**
+- Limite o número de threads gestoras ao máximo de sessões simultâneas permitidas.
+- Considere um limite prático, como 8 threads gestoras.
+
+---
+
+IMPORTANTE:
+
+o server/kvs. tem de ter 2 pools de tarefas, uma pool com varias tarefas que leem e processam os ficheiros .job na pasta jobs dada. Na outra pool de tarefas(Pool de Tarefas gestoras), Cada thread neste conjunto fica responsável por atender aos pedidos (subscribe, unsubscribe e disconnect) de um cliente que se tenha registado, o que implica ler da sua FIFO de pedido e escrever na sua FIFO de resposta.
+Isto significa que o número total de threads gestoras será igual ao número máximo de sessões que o teu servidor vai permitir simultaneamente.
+
+A ideia é que o cliente utilize apenas duas threads. Uma lê do stdin os comandos, envia-os ao servidor e recebe a resposta. A outra é responsável por ler da fifo de notificações e por printar as notificações para o stdout.
