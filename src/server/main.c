@@ -11,6 +11,7 @@
 
 #include "src/common/protocol.h"
 #include "src/common/constants.h"
+#include "src/client/api.h"
 #include "constants.h"
 #include "io.h"
 #include "operations.h"
@@ -200,18 +201,48 @@ static void *handle_session(void *arg) {
       break;
     }
 
+    char response[2]; // Response buffer with OP_CODE and result
+    response[1] = 1; // Default result is failure
+
     switch (buffer[0]) {
-    case OP_CODE_SUBSCRIBE:
-      // Handle subscribe
+    case OP_CODE_SUBSCRIBE: {
+      response[0] = OP_CODE_SUBSCRIBE;
+      char key[MAX_STRING_SIZE];
+      strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
+      key[MAX_STRING_SIZE - 1] = '\0';
+
+      // Implementar lógica de subscrição
+      // Aqui você deve adicionar a lógica para lidar com a subscrição
+      // Exemplo: adicionar a chave a uma lista de chaves subscritas
+      // Se a subscrição for bem-sucedida, definir response[1] para 0
+
       break;
-    case OP_CODE_UNSUBSCRIBE:
-      // Handle unsubscribe
+    }
+    case OP_CODE_UNSUBSCRIBE: {
+      response[0] = OP_CODE_UNSUBSCRIBE;
+      char key[MAX_STRING_SIZE];
+      strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
+      key[MAX_STRING_SIZE - 1] = '\0';
+
+      // Implementar lógica de cancelamento de subscrição
+      // Aqui você deve adicionar a lógica para lidar com o cancelamento de subscrição
+      // Exemplo: remover a chave de uma lista de chaves subscritas
+      // Se o cancelamento for bem-sucedido, definir response[1] para 0
+
       break;
+    }
     case OP_CODE_DISCONNECT:
+      response[0] = OP_CODE_DISCONNECT;
       session->active = 0;
+      response[1] = 0; // Success
       break;
     default:
       fprintf(stderr, "Unknown operation code\n");
+      break;
+    }
+
+    if (write(resp_fd, response, sizeof(response)) == -1) {
+      perror("Failed to write response to response pipe");
       break;
     }
   }

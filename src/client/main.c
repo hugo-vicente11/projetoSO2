@@ -4,11 +4,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "parser.h"
 #include "src/client/api.h"
 #include "src/common/constants.h"
 #include "src/common/io.h"
+
+void *notification_thread(void *arg) {
+  int notif_pipe = *(int *)arg;
+  char buffer[41];
+
+  while (1) {
+    ssize_t bytes_read = read(notif_pipe, buffer, sizeof(buffer));
+    if (bytes_read > 0) {
+      printf("Notification: %s\n", buffer);
+    } else if (bytes_read == -1 && errno != EAGAIN) {
+      perror("Failed to read from notification pipe");
+      break;
+    }
+    sleep(1);
+  }
+
+  return NULL;
+}
 
 int main(int argc, char *argv[]) {
   if (argc < 3) {
@@ -29,7 +48,17 @@ int main(int argc, char *argv[]) {
   strncat(resp_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
   strncat(notif_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
 
-  // TODO open pipes
+  int notif_pipe;
+  if (kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path, &notif_pipe) != 0) {
+    fprintf(stderr, "Failed to connect to the server\n");
+    return 1;
+  }
+
+  pthread_t notif_thread;
+  if (pthread_create(&notif_thread, NULL, notification_thread, &notif_pipe) != 0) {
+    perror("Failed to create notification thread");
+    return 1;
+  }
 
   while (1) {
     switch (get_next(STDIN_FILENO)) {
@@ -38,7 +67,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to disconnect to the server\n");
         return 1;
       }
-      // TODO: end notifications thread
+      pthread_cancel(notif_thread);
+      pthread_join(notif_thread, NULL);
       printf("Disconnected from server\n");
       return 0;
 
