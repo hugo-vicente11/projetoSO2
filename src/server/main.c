@@ -438,43 +438,55 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  printf("Debug: Initializing KVS\n");
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
   }
 
+  printf("Debug: Unlinking register pipe path\n");
   unlink(register_pipe_path);
 
+  printf("Debug: Creating register pipe\n");
   if (mkfifo(register_pipe_path, 0666) == -1) {
     perror("Failed to create register pipe");
     return 1;
   }
 
+  printf("Debug: Opening register pipe\n");
   int register_fd = open(register_pipe_path, O_RDONLY);
   if (register_fd == -1) {
     perror("Failed to open register pipe");
     return 1;
   }
 
+  printf("Debug: Opening jobs directory\n");
   DIR *dir = opendir(argv[1]);
   if (dir == NULL) {
     fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
     return 0;
   }
 
+  printf("Debug: Dispatching threads\n");
   dispatch_threads(dir);
 
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     sessions[i].active = 0;
   }
 
+  printf("Debug: Entering main loop\n");
   while (1) {
     char req_pipe_path[40], resp_pipe_path[40], notif_pipe_path[40];
     char buffer[1 + 3 * 40];
-    if (read(register_fd, buffer, sizeof(buffer)) <= 0) {
-      perror("Failed to read from register pipe");
+    ssize_t bytes_read = read(register_fd, buffer, sizeof(buffer));
+    if (bytes_read <= 0) {
+      if (bytes_read == -1) {
+        perror("Failed to read from register pipe");
+      }
       continue;
     }
+
+    printf("Debug: Read %zd bytes from register pipe\n", bytes_read);
 
     if (buffer[0] == OP_CODE_CONNECT) {
       strncpy(req_pipe_path, buffer + 1, 40);
@@ -494,6 +506,7 @@ int main(int argc, char **argv) {
         continue;
       }
 
+      printf("Debug: Starting session %d\n", session_index);
       strncpy(sessions[session_index].req_pipe_path, req_pipe_path, 40);
       strncpy(sessions[session_index].resp_pipe_path, resp_pipe_path, 40);
       strncpy(sessions[session_index].notif_pipe_path, notif_pipe_path, 40);

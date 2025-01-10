@@ -36,17 +36,17 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  char req_pipe_path[256] = "/tmp/req";
-  char resp_pipe_path[256] = "/tmp/resp";
-  char notif_pipe_path[256] = "/tmp/notif";
+  char req_pipe_path[256];
+  char resp_pipe_path[256];
+  char notif_pipe_path[256];
+
+  snprintf(req_pipe_path, sizeof(req_pipe_path), "/tmp/req_%s", argv[1]);
+  snprintf(resp_pipe_path, sizeof(resp_pipe_path), "/tmp/resp_%s", argv[1]);
+  snprintf(notif_pipe_path, sizeof(notif_pipe_path), "/tmp/notif_%s", argv[1]);
 
   char keys[MAX_NUMBER_SUB][MAX_STRING_SIZE] = {0};
   unsigned int delay_ms;
   size_t num;
-
-  strncat(req_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
-  strncat(resp_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
-  strncat(notif_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
 
   int notif_pipe;
   if (kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path, &notif_pipe) != 0) {
