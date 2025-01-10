@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <errno.h>
 
 #include "src/common/protocol.h"
@@ -18,6 +19,9 @@
 #include "io.h"
 #include "operations.h"
 #include "parser.h"
+
+static sem_t job_sem;
+static pthread_t job_thread;
 
 struct SharedData {
   DIR *dir;
@@ -232,10 +236,18 @@ static void *handle_session(void *arg) {
 
   char buffer[41];
   while (session->active) {
-    if (read(req_fd, buffer, sizeof(buffer)) <= 0) {
-      perror("Failed to read from request pipe");
+    ssize_t bytes_read = read(req_fd, buffer, sizeof(buffer));
+    if (bytes_read <= 0) {
+      if (bytes_read == 0) {
+        printf("Debug: Request pipe closed by client\n");
+      } else {
+        perror("Failed to read from request pipe");
+      }
       break;
     }
+
+    printf("Debug: Read %zd bytes from request pipe\n", bytes_read);
+    printf("Debug: Received message: OP_CODE=%d, key=%s\n", buffer[0], buffer + 1);
 
     char response[2]; // Response buffer with OP_CODE and result
     response[1] = 1; // Default result is failure
@@ -290,6 +302,8 @@ static void *handle_session(void *arg) {
       perror("Failed to write response to response pipe");
       break;
     }
+
+    printf("Debug: Sent response: OP_CODE=%d, result=%d\n", response[0], response[1]);
   }
 
   close(req_fd);
@@ -404,6 +418,12 @@ static void dispatch_threads(DIR *dir) {
   free(threads);
 }
 
+static void *job_dispatcher(void *arg) {
+    DIR *dir = (DIR *)arg;
+    dispatch_threads(dir);
+    return NULL;
+}
+
 int main(int argc, char **argv) {
   if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
@@ -467,14 +487,20 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  printf("Debug: Dispatching threads\n");
-  dispatch_threads(dir);
+    // Inicializar semaforos
+  sem_init(&job_sem, 0, 0);
+
+  // Dispara thread para tratar dos .job
+  if (pthread_create(&job_thread, NULL, job_dispatcher, (void *)dir) != 0) {
+    perror("Failed to create job dispatcher thread");
+    return 1;
+  }
 
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     sessions[i].active = 0;
   }
 
-  printf("Debug: Entering main loop\n");
+    printf("Debug: Entering main loop\n");
   while (1) {
     char req_pipe_path[40], resp_pipe_path[40], notif_pipe_path[40];
     char buffer[1 + 3 * 40];
@@ -533,6 +559,7 @@ int main(int argc, char **argv) {
   }
 
   kvs_terminate();
-
+  pthread_join(job_thread, NULL);
+  sem_destroy(&job_sem);
   return 0;
 }

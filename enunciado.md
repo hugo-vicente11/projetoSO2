@@ -1,19 +1,3 @@
-# Projeto de Sistemas Operativos
-
-# Enunciado da 2ª parte do projeto
-
-A segunda parte do projeto consiste de 2 exercícios que visam:
-i) Tornar o IST-KVS acessível a processos clientes que queiram monitorizar
-alterações de certos pares chave-valor ligando ao IST-KVS através de
-_named pipes_ ,
-ii) Terminar as ligações entre o IST-KVS e os clientes usando sinais.
-**Código base**
-O código base fornecido para esta 2ª parte contém uma implementação do servidor que
-corresponde a uma possível solução da primeira parte do projeto. Também contém uma
-implementação da API de cliente vazia. Os comandos utilizados nesta parte do projeto são
-todos os introduzidos na primeira parte e são estendidos de forma a permitir a
-monitorização de alterações ao IST-KVS.
-
 ### Exercício 1. Interação com processos clientes por named pipes
 
 O IST-KVS deve passar a ser um processo servidor autónomo, lançado da seguinte forma:

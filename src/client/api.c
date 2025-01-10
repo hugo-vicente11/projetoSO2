@@ -115,30 +115,40 @@ int kvs_subscribe(const char *key) {
   message[0] = OP_CODE_SUBSCRIBE;
   snprintf(message + 1, 40, "%s", key);
 
+  printf("Debug: Sending subscribe message: OP_CODE=%d, key=%s\n", message[0], message + 1);
+
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send subscribe message");
     close(req_fd);
     return 1;
   }
 
-  close(req_fd);
+  // Não fechar o req_fd aqui para manter o pipe aberto
+  // close(req_fd);
 
   int resp_fd = open(global_resp_pipe_path, O_RDONLY);
   if (resp_fd == -1) {
     perror("Failed to open response pipe");
+    close(req_fd); // Fechar o req_fd aqui se a abertura do resp_fd falhar
     return 1;
   }
 
-  char response;
-  if (read(resp_fd, &response, 1) == -1) {
+  char response[2];
+  ssize_t bytes_read = read(resp_fd, response, sizeof(response));
+  if (bytes_read == -1) {
     perror("Failed to read subscribe response");
+    close(req_fd); // Fechar o req_fd aqui se a leitura do resp_fd falhar
     close(resp_fd);
     return 1;
   }
 
+  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
+  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
+
+  close(req_fd); // Fechar o req_fd aqui após a leitura da resposta
   close(resp_fd);
 
-  if (response != 0 && response != 1) {
+  if (response[1] != 0 && response[1] != 1) {
     fprintf(stderr, "Server returned an invalid response for subscribe\n");
     return 1;
   }
