@@ -62,4 +62,9 @@ void set_n_current_backups(int _n_current_backups);
 // @return n_current_backups
 int get_n_current_backups();
 
+/// Checks if a key exists in the hashtable.
+/// @param key Key to check.
+/// @return 1 if the key exists, 0 otherwise.
+int kvs_key_exists(const char *key);
+
 #endif // KVS_OPERATIONS_H

@@ -123,13 +123,10 @@ int kvs_subscribe(const char *key) {
     return 1;
   }
 
-  // Não fechar o req_fd aqui para manter o pipe aberto
-  // close(req_fd);
-
   int resp_fd = open(global_resp_pipe_path, O_RDONLY);
   if (resp_fd == -1) {
     perror("Failed to open response pipe");
-    close(req_fd); // Fechar o req_fd aqui se a abertura do resp_fd falhar
+    close(req_fd);
     return 1;
   }
 
@@ -137,7 +134,7 @@ int kvs_subscribe(const char *key) {
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
   if (bytes_read == -1) {
     perror("Failed to read subscribe response");
-    close(req_fd); // Fechar o req_fd aqui se a leitura do resp_fd falhar
+    close(req_fd);
     close(resp_fd);
     return 1;
   }
@@ -145,7 +142,7 @@ int kvs_subscribe(const char *key) {
   printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
   printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
-  close(req_fd); // Fechar o req_fd aqui após a leitura da resposta
+  close(req_fd);
   close(resp_fd);
 
   if (response[1] != 0 && response[1] != 1) {
@@ -153,6 +150,7 @@ int kvs_subscribe(const char *key) {
     return 1;
   }
 
+  printf("Server returned %d for operation: subscribe\n", response[1]);
   return 0;
 }
 
@@ -195,5 +193,6 @@ int kvs_unsubscribe(const char *key) {
     return 1;
   }
 
+  printf("Server returned %d for operation: unsubscribe\n", response);
   return 0;
 }

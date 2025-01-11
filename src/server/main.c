@@ -250,7 +250,7 @@ static void *handle_session(void *arg) {
     printf("Debug: Received message: OP_CODE=%d, key=%s\n", buffer[0], buffer + 1);
 
     char response[2]; // Response buffer with OP_CODE and result
-    response[1] = 1; // Default result is failure
+    response[1] = 1;
 
     switch (buffer[0]) {
     case OP_CODE_SUBSCRIBE: {
@@ -259,11 +259,19 @@ static void *handle_session(void *arg) {
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
-      // Adicionar a chave à lista de chaves subscritas
-      if (session->num_subscribed_keys < MAX_NUMBER_SUB) {
-        strncpy(session->subscribed_keys[session->num_subscribed_keys], key, MAX_STRING_SIZE);
-        session->num_subscribed_keys++;
-        response[1] = 0; // Success
+      // Verificar se a chave existe na hashtable
+      if (kvs_key_exists(key)) {
+        // Adicionar a chave à lista de chaves subscritas
+        if (session->num_subscribed_keys < MAX_NUMBER_SUB) {
+          strncpy(session->subscribed_keys[session->num_subscribed_keys], key, MAX_STRING_SIZE);
+          session->num_subscribed_keys++;
+          response[1] = 1; // Key exists
+          printf("Debug: Subscribed to key: %s\n", key);
+          printf("Debug: Total subscribed keys: %d\n", session->num_subscribed_keys);
+        }
+      } else {
+        response[1] = 0; // Key does not exist
+        printf("Debug: Key does not exist: %s\n", key);
       }
 
       break;
@@ -275,6 +283,7 @@ static void *handle_session(void *arg) {
       key[MAX_STRING_SIZE - 1] = '\0';
 
       // Remover a chave da lista de chaves subscritas
+      int found = 0;
       for (int i = 0; i < session->num_subscribed_keys; i++) {
         if (strcmp(session->subscribed_keys[i], key) == 0) {
           for (int j = i; j < session->num_subscribed_keys - 1; j++) {
@@ -282,8 +291,15 @@ static void *handle_session(void *arg) {
           }
           session->num_subscribed_keys--;
           response[1] = 0; // Success
+          found = 1;
+          printf("Debug: Unsubscribed from key: %s\n", key);
+          printf("Debug: Total subscribed keys: %d\n", session->num_subscribed_keys);
           break;
         }
+      }
+      if (!found) {
+        response[1] = 1;
+        printf("Debug: Subscription did not exist for key: %s\n", key);
       }
 
       break;

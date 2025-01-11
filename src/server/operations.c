@@ -181,3 +181,19 @@ void kvs_wait(unsigned int delay_ms) {
   struct timespec delay = delay_to_timespec(delay_ms);
   nanosleep(&delay, NULL);
 }
+
+int kvs_key_exists(const char *key) {
+  int index = hash(key);
+
+  pthread_rwlock_rdlock(&kvs_table->tablelock);
+  KeyNode *keyNode = kvs_table->table[index];
+  while (keyNode != NULL) {
+    if (strcmp(keyNode->key, key) == 0) {
+      pthread_rwlock_unlock(&kvs_table->tablelock);
+      return 1; // Key exists
+    }
+    keyNode = keyNode->next;
+  }
+  pthread_rwlock_unlock(&kvs_table->tablelock);
+  return 0; // Key does not exist
+}
