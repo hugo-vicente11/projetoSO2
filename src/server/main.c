@@ -253,11 +253,11 @@ static void *handle_session(void *arg) {
     printf("Debug: Received message: OP_CODE=%d, key=%s\n", buffer[0], buffer + 1);
 
     char response[2]; // Response buffer with OP_CODE and result
+    response[0] = buffer[0];
     response[1] = 1;
 
     switch (buffer[0]) {
     case OP_CODE_SUBSCRIBE: {
-      response[0] = OP_CODE_SUBSCRIBE;
       char key[MAX_STRING_SIZE];
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
@@ -280,7 +280,6 @@ static void *handle_session(void *arg) {
       break;
     }
     case OP_CODE_UNSUBSCRIBE: {
-      response[0] = OP_CODE_UNSUBSCRIBE;
       char key[MAX_STRING_SIZE];
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
@@ -308,7 +307,6 @@ static void *handle_session(void *arg) {
       break;
     }
     case OP_CODE_DISCONNECT:
-      response[0] = OP_CODE_DISCONNECT;
       session->active = 0;
       response[1] = 0; // Success
       break;

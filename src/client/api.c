@@ -62,51 +62,63 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
 }
 
 int kvs_disconnect(void) {
-  req_fd = open(global_req_pipe_path, O_WRONLY);
+  printf("Debug: kvs_disconnect called\n");
+
+  // Abrir o req_fd se ainda não estiver aberto
   if (req_fd == -1) {
-    perror("Failed to open request pipe");
-    return 1;
+    req_fd = open(global_req_pipe_path, O_WRONLY);
+    if (req_fd == -1) {
+      perror("Failed to open request pipe");
+      return 1;
+    }
+    printf("Debug: Request pipe opened successfully\n");
   }
 
-  char message[2];
+  char message[1];
   message[0] = OP_CODE_DISCONNECT;
-  message[1] = '\0';
+
+  printf("Debug: Sending disconnect message: OP_CODE=%d\n", message[0]);
+
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send disconnect message");
-    close(req_fd);
-    req_fd = -1;
+    return 1;
+  }
+  printf("Debug: Disconnect message sent successfully\n");
+
+  // Abrir o resp_fd se ainda não estiver aberto
+  if (resp_fd == -1) {
+    resp_fd = open(global_resp_pipe_path, O_RDONLY);
+    if (resp_fd == -1) {
+      perror("Failed to open response pipe");
+      return 1;
+    }
+    printf("Debug: Response pipe opened successfully\n");
+  }
+
+  char response[2];
+  ssize_t bytes_read = read(resp_fd, response, sizeof(response));
+  if (bytes_read == -1) {
+    perror("Failed to read disconnect response");
+    return 1;
+  }
+  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
+  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
+
+  if (response[1] != 0) {
+    fprintf(stderr, "Server failed to disconnect\n");
     return 1;
   }
 
   close(req_fd);
-  req_fd = -1;
-
-  resp_fd = open(global_resp_pipe_path, O_RDONLY);
-  if (resp_fd == -1) {
-    perror("Failed to open response pipe");
-    return 1;
-  }
-
-  char response;
-  if (read(resp_fd, &response, 1) == -1) {
-    perror("Failed to read disconnect response");
-    close(resp_fd);
-    resp_fd = -1;
-    return 1;
-  }
-
   close(resp_fd);
+  req_fd = -1;
   resp_fd = -1;
-
-  if (response != 0) {
-    fprintf(stderr, "Server failed to disconnect\n");
-    return 1;
-  }
 
   unlink(global_req_pipe_path);
   unlink(global_resp_pipe_path);
   unlink(global_notif_pipe_path);
 
+  printf("Debug: Disconnected successfully\n");
   return 0;
 }
 
@@ -131,8 +143,6 @@ int kvs_subscribe(const char *key) {
 
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send subscribe message");
-    close(req_fd);
-    req_fd = -1;
     return 1;
   }
   printf("Debug: Subscribe message sent successfully\n");
@@ -151,8 +161,6 @@ int kvs_subscribe(const char *key) {
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
   if (bytes_read == -1) {
     perror("Failed to read subscribe response");
-    close(resp_fd);
-    resp_fd = -1;
     return 1;
   }
   printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
@@ -188,8 +196,6 @@ int kvs_unsubscribe(const char *key) {
 
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send unsubscribe message");
-    close(req_fd);
-    req_fd = -1;
     return 1;
   }
   printf("Debug: Unsubscribe message sent successfully\n");
@@ -208,8 +214,6 @@ int kvs_unsubscribe(const char *key) {
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
   if (bytes_read == -1) {
     perror("Failed to read unsubscribe response");
-    close(resp_fd);
-    resp_fd = -1;
     return 1;
   }
   printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
