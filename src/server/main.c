@@ -20,7 +20,6 @@
 #include "operations.h"
 #include "parser.h"
 
-static sem_t job_sem;
 static pthread_t job_thread;
 
 struct SharedData {
@@ -47,6 +46,10 @@ size_t max_backups;        // Maximum allowed simultaneous backups
 size_t max_threads;        // Maximum allowed simultaneous threads
 char *jobs_directory = NULL;
 struct SessionData sessions[MAX_SESSION_COUNT];
+sem_t semEmpty;
+sem_t semFull;
+pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+int buffer_counter = 0;
 
 int filter_job_files(const struct dirent *entry) {
   const char *dot = strrchr(entry->d_name, '.');
@@ -503,20 +506,20 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-    // Inicializar semaforos
-  sem_init(&job_sem, 0, 0);
-
   // Dispara thread para tratar dos .job
   if (pthread_create(&job_thread, NULL, job_dispatcher, (void *)dir) != 0) {
     perror("Failed to create job dispatcher thread");
     return 1;
   }
 
+  sem_init(&semEmpty, 0, MAX_SESSION_COUNT);
+  sem_init(&semFull, 0, 0);
+
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     sessions[i].active = 0;
   }
 
-    printf("Debug: Entering main loop\n");
+  printf("Debug: Entering main loop\n");
   while (1) {
     char req_pipe_path[40], resp_pipe_path[40], notif_pipe_path[40];
     char buffer[1 + 3 * 40];
@@ -531,6 +534,9 @@ int main(int argc, char **argv) {
     printf("Debug: Read %zd bytes from register pipe\n", bytes_read);
 
     if (buffer[0] == OP_CODE_CONNECT) {
+      sem_wait(&semEmpty);
+      pthread_mutex_lock(&buffer_mutex);
+
       strncpy(req_pipe_path, buffer + 1, 40);
       strncpy(resp_pipe_path, buffer + 41, 40);
       strncpy(notif_pipe_path, buffer + 81, 40);
@@ -545,6 +551,8 @@ int main(int argc, char **argv) {
 
       if (session_index == -1) {
         fprintf(stderr, "No available sessions\n");
+        pthread_mutex_unlock(&buffer_mutex);
+        sem_post(&semEmpty);
         continue;
       }
 
@@ -553,10 +561,18 @@ int main(int argc, char **argv) {
       strncpy(sessions[session_index].resp_pipe_path, resp_pipe_path, 40);
       strncpy(sessions[session_index].notif_pipe_path, notif_pipe_path, 40);
       sessions[session_index].active = 1;
+      buffer_counter++;
+
+      pthread_mutex_unlock(&buffer_mutex);
+      sem_post(&semFull);
 
       if (pthread_create(&sessions[session_index].thread, NULL, handle_session, &sessions[session_index]) != 0) {
         perror("Failed to create session thread");
         sessions[session_index].active = 0;
+        pthread_mutex_lock(&buffer_mutex);
+        buffer_counter--;
+        pthread_mutex_unlock(&buffer_mutex);
+        sem_post(&semEmpty);
       }
     }
   }
@@ -576,6 +592,7 @@ int main(int argc, char **argv) {
 
   kvs_terminate();
   pthread_join(job_thread, NULL);
-  sem_destroy(&job_sem);
+  sem_destroy(&semEmpty);
+  sem_destroy(&semFull);
   return 0;
 }
