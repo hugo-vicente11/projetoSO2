@@ -13,17 +13,21 @@
 
 void *notification_thread(void *arg) {
   int notif_pipe = *(int *)arg;
-  char buffer[41];
+  char buffer[2 * 41];
 
   while (1) {
     ssize_t bytes_read = read(notif_pipe, buffer, sizeof(buffer));
     if (bytes_read > 0) {
-      printf("Notification: %s\n", buffer);
+      char key[41], value[41];
+      strncpy(key, buffer, 40);
+      key[40] = '\0';
+      strncpy(value, buffer + 41, 40);
+      value[40] = '\0';
+      printf("(%s,%s)\n", key, value);
     } else if (bytes_read == -1 && errno != EAGAIN) {
       perror("Failed to read from notification pipe");
       break;
     }
-    sleep(1);
   }
 
   return NULL;
