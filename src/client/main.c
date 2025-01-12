@@ -23,6 +23,7 @@ void *notification_thread(void *arg) {
       key[40] = '\0';
       strncpy(value, buffer + 41, 40);
       value[40] = '\0';
+      printf("Debug: Received notification: key=%s, value=%s\n", key, value);
       printf("(%s,%s)\n", key, value);
     } else if (bytes_read == -1 && errno != EAGAIN) {
       perror("Failed to read from notification pipe");
@@ -59,6 +60,17 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  
+
+  // Open the notification pipe
+  notif_pipe = open(notif_pipe_path, O_RDONLY | O_NONBLOCK);
+  if (notif_pipe == -1) {
+    perror("Failed to open notification pipe");
+    return 1;
+  }
+
+  printf("Debug: Notification pipe opened successfully\n");
+  
   pthread_t notif_thread;
   if (pthread_create(&notif_thread, NULL, notification_thread, &notif_pipe) != 0) {
     perror("Failed to create notification thread");
@@ -70,7 +82,6 @@ int main(int argc, char *argv[]) {
     case CMD_DISCONNECT:
         printf("Debug: Received CMD_DISCONNECT\n");
         response_code = kvs_disconnect();
-        printf("Server returned %d for operation: disconnect\n", response_code);
         if (response_code != 0) {
             fprintf(stderr, "Failed to disconnect to the server\n");
             return 1;
@@ -138,5 +149,5 @@ int main(int argc, char *argv[]) {
         // input should end in a disconnect, or it will loop here forever
         break;
     }
-}
+  }
 }

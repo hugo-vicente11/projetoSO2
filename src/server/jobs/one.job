@@ -6,4 +6,5 @@ BACKUP
 DELETE [c]
 READ [c]
 WAIT 1000
+WRITE [(a,alalalalalala)]
 SHOW

@@ -83,19 +83,29 @@ static int entry_files(const char *dir, struct dirent *entry, char *in_path,
 }
 
 void notify_clients(const char *key, const char *value) {
+  printf("Debug: Notifying clients about key: %s, value: %s\n", key, value);
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    printf("Debug: Checking session %d, active: %d, num_subscribed_keys: %d\n", i, sessions[i].active, sessions[i].num_subscribed_keys);
     if (sessions[i].active) {
       for (int j = 0; j < sessions[i].num_subscribed_keys; j++) {
+        printf("Debug: Comparing subscribed key: %s with changed key: %s\n", sessions[i].subscribed_keys[j], key);
         if (strcmp(sessions[i].subscribed_keys[j], key) == 0) {
+          printf("Debug: Client %d subscribed to key: %s\n", i, key);
+          printf("Debug: Trying to open notification pipe: %s\n", sessions[i].notif_pipe_path);
           int notif_fd = open(sessions[i].notif_pipe_path, O_WRONLY);
           if (notif_fd != -1) {
+            printf("CONSEGUI ABRIR O PIPE DE NOTIS DESTA SESSAO!\n");
             char message[2 * 41];
             snprintf(message, 41, "%s", key);
             snprintf(message + 41, 41, "%s", value);
             if (write(notif_fd, message, sizeof(message)) == -1) {
               perror("Failed to write notification");
+            } else {
+              printf("Debug: Notification sent to client %d\n", i);
             }
             close(notif_fd);
+          } else {
+            perror("Failed to open notification pipe");
           }
         }
       }
@@ -262,6 +272,7 @@ static void *handle_session(void *arg) {
       strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
+      printf("Debug: Checking if key exists: %s\n", key);
       // Verificar se a chave existe na hashtable
       if (kvs_key_exists(key)) {
         // Adicionar a chave à lista de chaves subscritas
@@ -271,6 +282,8 @@ static void *handle_session(void *arg) {
           response[1] = 1; // Key exists
           printf("Debug: Subscribed to key: %s\n", key);
           printf("Debug: Total subscribed keys: %d\n", session->num_subscribed_keys);
+        } else {
+          printf("Debug: Maximum number of subscriptions reached\n");
         }
       } else {
         response[1] = 0; // Key does not exist
@@ -386,6 +399,8 @@ static void *get_file(void *arguments) {
       fprintf(stderr, "Thread failed to lock directory_mutex\n");
       return NULL;
     }
+    // REMOVER ANTES DE ENVIAR
+    run_job(STDIN_FILENO, STDOUT_FILENO, "stdin");
   }
 
   if (pthread_mutex_unlock(&thread_data->directory_mutex) != 0) {
