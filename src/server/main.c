@@ -561,6 +561,31 @@ int main(int argc, char **argv) {
       sessions[session_index].active = 1;
       buffer_counter++;
 
+      // Enviar resposta de conexão
+      int resp_fd = open(resp_pipe_path, O_WRONLY);
+      if (resp_fd == -1) {
+        perror("Failed to open response pipe for connection");
+        sessions[session_index].active = 0;
+        pthread_mutex_unlock(&buffer_mutex);
+        sem_post(&semEmpty);
+        continue;
+      }
+
+      char response[2];
+      response[0] = OP_CODE_CONNECT;
+      response[1] = 0; // Sucesso
+
+      if (write(resp_fd, response, sizeof(response)) == -1) {
+        perror("Failed to write connection response");
+        close(resp_fd);
+        sessions[session_index].active = 0;
+        pthread_mutex_unlock(&buffer_mutex);
+        sem_post(&semEmpty);
+        continue;
+      }
+
+      close(resp_fd);
+
       pthread_mutex_unlock(&buffer_mutex);
       sem_post(&semFull);
 

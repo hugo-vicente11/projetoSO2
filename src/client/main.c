@@ -53,7 +53,8 @@ int main(int argc, char *argv[]) {
   size_t num;
 
   int notif_pipe;
-  if (kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path, &notif_pipe) != 0) {
+  int response_code = kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path, &notif_pipe);
+  if (response_code != 0) {
     fprintf(stderr, "Failed to connect to the server\n");
     return 1;
   }
@@ -68,7 +69,9 @@ int main(int argc, char *argv[]) {
     switch (get_next(STDIN_FILENO)) {
     case CMD_DISCONNECT:
         printf("Debug: Received CMD_DISCONNECT\n");
-        if (kvs_disconnect() != 0) {
+        response_code = kvs_disconnect();
+        printf("Server returned %d for operation: disconnect\n", response_code);
+        if (response_code != 0) {
             fprintf(stderr, "Failed to disconnect to the server\n");
             return 1;
         }

@@ -52,13 +52,33 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
 
   close(server_fd);
 
+  printf("Debug: Waiting for server response on %s\n", resp_pipe_path);
+  resp_fd = open(global_resp_pipe_path, O_RDONLY);
+  if (resp_fd == -1) {
+    perror("Failed to open response pipe");
+    return 1;
+  }
+
+  char response[2];
+  ssize_t bytes_read = read(resp_fd, response, sizeof(response));
+  if (bytes_read == -1) {
+    perror("Failed to read connect response");
+    close(resp_fd);
+    resp_fd = -1;
+    return 1;
+  }
+  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
+  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
+
+  printf("Server returned %d for operation: connect\n", response[1]);
+
   *notif_pipe = open(notif_pipe_path, O_RDONLY | O_NONBLOCK);
   if (*notif_pipe == -1) {
     perror("Failed to open notification pipe");
     return 1;
   }
 
-  return 0;
+  return response[1];
 }
 
 int kvs_disconnect(void) {
@@ -103,6 +123,8 @@ int kvs_disconnect(void) {
   }
   printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
   printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
+
+  printf("Server returned %d for operation: disconnect\n", response[1]);
 
   if (response[1] != 0) {
     fprintf(stderr, "Server failed to disconnect\n");
