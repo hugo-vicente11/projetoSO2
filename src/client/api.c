@@ -58,7 +58,7 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
     perror("Failed to open response pipe");
     return 1;
   }
-
+  printf("PAREI DE ESPERAR\n");
   char response[2];
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
   if (bytes_read == -1) {

@@ -20,6 +20,22 @@
 #include "operations.h"
 #include "parser.h"
 
+
+#define BUFFER_SIZE MAX_SESSION_COUNT
+
+typedef struct {
+    char req_pipe_path[40];
+    char resp_pipe_path[40];
+    char notif_pipe_path[40];
+} ConnectionRequest;
+
+ConnectionRequest buffer[BUFFER_SIZE];
+
+
+
+
+
+
 static pthread_t job_thread;
 
 struct SharedData {
@@ -49,7 +65,6 @@ struct SessionData sessions[MAX_SESSION_COUNT];
 sem_t semEmpty;
 sem_t semFull;
 pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
-int buffer_counter = 0;
 
 int filter_job_files(const struct dirent *entry) {
   const char *dot = strrchr(entry->d_name, '.');
@@ -233,7 +248,7 @@ static int run_job(int in_fd, int out_fd, char *filename) {
   }
 }
 
-static void *handle_session(void *arg) {
+static void handle_session(void *arg) {
   struct SessionData *session = (struct SessionData *)arg;
   int req_fd = open(session->req_pipe_path, O_RDONLY);
   int resp_fd = open(session->resp_pipe_path, O_WRONLY);
@@ -242,14 +257,14 @@ static void *handle_session(void *arg) {
   if (req_fd == -1 || resp_fd == -1 || notif_fd == -1) {
     perror("Failed to open session pipes");
     session->active = 0;
-    return NULL;
+    return;
   }
 
   session->num_subscribed_keys = 0;
 
-  char buffer[41];
+  char local_buffer[41]; // Renomear para evitar sombreamento
   while (session->active) {
-    ssize_t bytes_read = read(req_fd, buffer, sizeof(buffer));
+    ssize_t bytes_read = read(req_fd, local_buffer, sizeof(local_buffer));
     if (bytes_read <= 0) {
       if (bytes_read == 0) {
         printf("Debug: Request pipe closed by client\n");
@@ -260,16 +275,16 @@ static void *handle_session(void *arg) {
     }
 
     printf("Debug: Read %zd bytes from request pipe\n", bytes_read);
-    printf("Debug: Received message: OP_CODE=%d, key=%s\n", buffer[0], buffer + 1);
+    printf("Debug: Received message: OP_CODE=%d, key=%s\n", local_buffer[0], local_buffer + 1);
 
     char response[2]; // Response buffer with OP_CODE and result
-    response[0] = buffer[0];
+    response[0] = local_buffer[0];
     response[1] = 1;
 
-    switch (buffer[0]) {
+    switch (local_buffer[0]) {
     case OP_CODE_SUBSCRIBE: {
       char key[MAX_STRING_SIZE];
-      strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
+      strncpy(key, local_buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
       printf("Debug: Checking if key exists: %s\n", key);
@@ -294,7 +309,7 @@ static void *handle_session(void *arg) {
     }
     case OP_CODE_UNSUBSCRIBE: {
       char key[MAX_STRING_SIZE];
-      strncpy(key, buffer + 1, MAX_STRING_SIZE - 1);
+      strncpy(key, local_buffer + 1, MAX_STRING_SIZE - 1);
       key[MAX_STRING_SIZE - 1] = '\0';
 
       // Remover a chave da lista de chaves subscritas
@@ -339,7 +354,14 @@ static void *handle_session(void *arg) {
   close(req_fd);
   close(resp_fd);
   close(notif_fd);
-  return NULL;
+
+  // Marcar a sessão como inativa e notificar a thread gestora
+  pthread_mutex_lock(&buffer_mutex);
+  session->active = 0;
+  pthread_mutex_unlock(&buffer_mutex);
+  sem_post(&semEmpty);
+
+  return;
 }
 
 
@@ -381,12 +403,12 @@ static void *get_file(void *arguments) {
       pthread_exit(NULL);
     }
 
-    int out = run_job(in_fd, out_fd, entry->d_name);
+    int result = run_job(in_fd, out_fd, entry->d_name); // Renomear para evitar sombreamento
 
     close(in_fd);
     close(out_fd);
 
-    if (out) {
+    if (result) {
       if (closedir(dir) == -1) {
         fprintf(stderr, "Failed to close directory\n");
         return 0;
@@ -453,6 +475,88 @@ static void dispatch_threads(DIR *dir) {
 static void *job_dispatcher(void *arg) {
     DIR *dir = (DIR *)arg;
     dispatch_threads(dir);
+    return NULL;
+}
+
+void *host_task(void *arg) {
+    int register_fd = *(int *)arg;
+    int index;
+    while (1) {
+        char read_buffer[1 + 3 * 40];
+        ssize_t bytes_read = read(register_fd, read_buffer, sizeof(read_buffer));
+        if (bytes_read <= 0) {
+            if (bytes_read == -1) {
+                perror("Failed to read from register pipe");
+            }
+            continue;
+        }
+
+        if (read_buffer[0] == OP_CODE_CONNECT) {
+            sem_wait(&semEmpty);
+            pthread_mutex_lock(&buffer_mutex);
+            sem_getvalue(&semFull, &index);
+            strncpy(buffer[index].req_pipe_path, read_buffer + 1, 40);
+            strncpy(buffer[index].resp_pipe_path, read_buffer + 41, 40);
+            strncpy(buffer[index].notif_pipe_path, read_buffer + 81, 40);
+
+            pthread_mutex_unlock(&buffer_mutex);
+            sem_post(&semFull);
+        }
+    }
+    return NULL;
+}
+
+void *manager_task(void *arg) {
+    (void)arg; // Ignorar o parâmetro não utilizado
+    int index;
+    while (1) {
+        sem_wait(&semFull);
+        pthread_mutex_lock(&buffer_mutex);
+        sem_getvalue(&semFull, &index);
+        ConnectionRequest request = buffer[index];
+
+        pthread_mutex_unlock(&buffer_mutex);
+        sem_post(&semEmpty);
+
+        // Handle the connection request
+        int session_index = -1;
+        for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if (!sessions[i].active) {
+                session_index = i;
+                break;
+            }
+        }
+
+        if (session_index != -1) {
+            strncpy(sessions[session_index].req_pipe_path, request.req_pipe_path, 40);
+            strncpy(sessions[session_index].resp_pipe_path, request.resp_pipe_path, 40);
+            strncpy(sessions[session_index].notif_pipe_path, request.notif_pipe_path, 40);
+            sessions[session_index].active = 1;
+
+            // Enviar resposta de conexão
+            int resp_fd = open(request.resp_pipe_path, O_WRONLY);
+            if (resp_fd == -1) {
+                perror("Failed to open response pipe for connection");
+                sessions[session_index].active = 0;
+                continue;
+            }
+
+            char response[2];
+            response[0] = OP_CODE_CONNECT;
+            response[1] = 0; // Sucesso
+
+            if (write(resp_fd, response, sizeof(response)) == -1) {
+                perror("Failed to write connection response");
+                close(resp_fd);
+                sessions[session_index].active = 0;
+                continue;
+            }
+
+            close(resp_fd);
+
+            handle_session(&sessions[session_index]);
+        }
+    }
     return NULL;
 }
 
@@ -532,87 +636,24 @@ int main(int argc, char **argv) {
     sessions[i].active = 0;
   }
 
-  printf("Debug: Entering main loop\n");
-  while (1) {
-    char req_pipe_path[40], resp_pipe_path[40], notif_pipe_path[40];
-    char buffer[1 + 3 * 40];
-    ssize_t bytes_read = read(register_fd, buffer, sizeof(buffer));
-    if (bytes_read <= 0) {
-      if (bytes_read == -1) {
-        perror("Failed to read from register pipe");
-      }
-      continue;
+  pthread_t host_thread;
+  pthread_t manager_threads[MAX_SESSION_COUNT];
+
+  if (pthread_create(&host_thread, NULL, host_task, &register_fd) != 0) {
+    perror("Failed to create host thread");
+    return 1;
+  }
+
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if (pthread_create(&manager_threads[i], NULL, manager_task, NULL) != 0) {
+      perror("Failed to create manager thread");
+      return 1;
     }
+  }
 
-    printf("Debug: Read %zd bytes from register pipe\n", bytes_read);
-
-    if (buffer[0] == OP_CODE_CONNECT) {
-      sem_wait(&semEmpty);
-      pthread_mutex_lock(&buffer_mutex);
-
-      strncpy(req_pipe_path, buffer + 1, 40);
-      strncpy(resp_pipe_path, buffer + 41, 40);
-      strncpy(notif_pipe_path, buffer + 81, 40);
-
-      int session_index = -1;
-      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-        if (!sessions[i].active) {
-          session_index = i;
-          break;
-        }
-      }
-
-      if (session_index == -1) {
-        fprintf(stderr, "No available sessions\n");
-        pthread_mutex_unlock(&buffer_mutex);
-        sem_post(&semEmpty);
-        continue;
-      }
-
-      printf("Debug: Starting session %d\n", session_index);
-      strncpy(sessions[session_index].req_pipe_path, req_pipe_path, 40);
-      strncpy(sessions[session_index].resp_pipe_path, resp_pipe_path, 40);
-      strncpy(sessions[session_index].notif_pipe_path, notif_pipe_path, 40);
-      sessions[session_index].active = 1;
-      buffer_counter++;
-
-      // Enviar resposta de conexão
-      int resp_fd = open(resp_pipe_path, O_WRONLY);
-      if (resp_fd == -1) {
-        perror("Failed to open response pipe for connection");
-        sessions[session_index].active = 0;
-        pthread_mutex_unlock(&buffer_mutex);
-        sem_post(&semEmpty);
-        continue;
-      }
-
-      char response[2];
-      response[0] = OP_CODE_CONNECT;
-      response[1] = 0; // Sucesso
-
-      if (write(resp_fd, response, sizeof(response)) == -1) {
-        perror("Failed to write connection response");
-        close(resp_fd);
-        sessions[session_index].active = 0;
-        pthread_mutex_unlock(&buffer_mutex);
-        sem_post(&semEmpty);
-        continue;
-      }
-
-      close(resp_fd);
-
-      pthread_mutex_unlock(&buffer_mutex);
-      sem_post(&semFull);
-
-      if (pthread_create(&sessions[session_index].thread, NULL, handle_session, &sessions[session_index]) != 0) {
-        perror("Failed to create session thread");
-        sessions[session_index].active = 0;
-        pthread_mutex_lock(&buffer_mutex);
-        buffer_counter--;
-        pthread_mutex_unlock(&buffer_mutex);
-        sem_post(&semEmpty);
-      }
-    }
+  pthread_join(host_thread, NULL);
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    pthread_join(manager_threads[i], NULL);
   }
 
   if (closedir(dir) == -1) {

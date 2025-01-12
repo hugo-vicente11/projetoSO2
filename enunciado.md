@@ -247,130 +247,29 @@ Quando os pipes do servidor fecharem ao receber o sinal, o cliente deverá termi
 
 # Arquitetura do Sistema IST-KVS
 
-Este documento descreve a arquitetura representada na imagem, detalhando os componentes, fluxos de operação e sugestões de implementação para um sistema em C.
-
----
-
-## **Componentes do Sistema**
-
-### **1. Ficheiros pasta jobs**
-- Representado por um ícone de base de dados no canto superior direito.
-- Armazena os ficheiros associados às tarefas.
-- Fonte de dados inicial para o processamento do sistema.
-
-### **2. Pool de Tarefas que Lêem Ficheiros**
-- Conjunto de threads responsáveis por ler os ficheiros armazenados na "Ficheiros pasta jobs".
-- Processa os dados iniciais e os repassa para as outras camadas do sistema.
-- Cada tarefa neste pool funciona como um thread independente.
-
-### **3. Tarefa Anfitriã**
-- Representada por um bloco verde no centro do diagrama.
-- Atua como controlador principal, coordenando interações entre:
-  - **Pool de Tarefas que Lêem Ficheiros**
-  - **Pool de Tarefas Gestoras**
-  - As filas de comunicação (FIFOs).
-
-### **4. Pool de Tarefas Gestoras**
-- Representado por um bloco azul.
-- Conjunto de threads responsáveis pela execução das operações principais.
-- Realiza o processamento dos pedidos recebidos pelos clientes de forma assíncrona e simultânea.
-- Cada thread neste pool fica responsável por atender aos pedidos (e.g., `subscribe`, `unsubscribe`, `disconnect`) de um cliente que se tenha registado:
-  - Lendo da sua **FIFO de Pedido**.
-  - Escrevendo na sua **FIFO de Resposta**.
-- O número total de threads gestoras será igual ao número máximo de sessões simultâneas que o servidor permite. Por exemplo:
-  - Caso seja imposto um limite, pode-se configurar até 8 threads gestoras.
-
----
-
-## **Estrutura de Comunicação (FIFOs)**
-
-### **1. FIFO de Pedido**
-- Cada cliente se comunica com o sistema através de uma FIFO de pedido.
-- Os pedidos são enviados para o **Pool de Tarefas Gestoras** para processamento.
-
-### **2. FIFO de Resposta**
-- As respostas dos pedidos processados são enviadas de volta aos clientes por FIFOs dedicadas.
-
-### **3. FIFO de Notificações**
-- Canal para as tarefas notificarem o sistema ou os clientes sobre:
-  - Progresso
-  - Conclusão de tarefas
-
-### **4. FIFO de Registo**
-- Representado por um bloco verde na lateral do diagrama.
-- Usado para registrar informações do sistema, como:
-  - Logs das tarefas
-  - Dados de depuração
-
----
-
-## **Fluxo de Operações**
-
-1. **Entrada de Dados**:
-   - Os ficheiros são lidos pela **Pool de Tarefas que Lêem Ficheiros**.
-   - Os dados lidos são extraídos e enviados para a **Tarefa Anfitriã**.
-
-2. **Distribuição de Tarefas**:
-   - A **Tarefa Anfitriã** distribui os dados para o **Pool de Tarefas Gestoras**.
-
-3. **Processamento e Respostas**:
-   - Os clientes enviam pedidos ao sistema através das **FIFOs de Pedido**.
-   - As tarefas gestoras processam os pedidos e enviam as respostas via **FIFOs de Resposta**.
-
-4. **Notificações**:
-   - Informações sobre progresso ou conclusão das tarefas são enviadas através das **FIFOs de Notificações**.
-
-5. **Registo**:
-   - Logs e informações de depuração são armazenados na **FIFO de Registo**.
-
----
-
-## **Estrutura do Cliente**
-
-- O cliente utiliza **apenas duas threads** para comunicação e processamento:
-  1. **Thread 1**:
-     - Lê comandos do `stdin`.
-     - Envia os comandos ao servidor.
-     - Recebe a resposta e apresenta o resultado no `stdout`.
-  2. **Thread 2**:
-     - Lê da **FIFO de Notificações**.
-     - Imprime as notificações recebidas no `stdout`.
-
----
-
-## **Sugestões para Implementação em C**
-
-### **1. Threads**
-- Utilize `pthread` para implementar:
-  - **Pool de Tarefas que Lêem Ficheiros**
-  - **Pool de Tarefas Gestoras**
-  - Threads específicas no cliente.
-
-### **2. Comunicação com FIFOs**
-- Use named pipes (`mkfifo`) para implementar as filas de comunicação (FIFOs).
-
-### **3. Sincronização**
-- Utilize mutexes e semáforos (`pthread_mutex` e `sem_t`) para sincronizar o acesso às FIFOs e evitar condições de corrida.
-
-### **4. Estruturas de Dados**
-- Defina estruturas claras para:
-  - **Pedidos**
-  - **Respostas**
-  - **Notificações**
-- Certifique-se de que as FIFOs manipulem os dados de maneira consistente.
-
-### **5. Logs e FIFO de Registo**
-- Configure uma thread dedicada para processar os logs enviados à FIFO de Registo.
-
-### **6. Configuração do Pool de Tarefas Gestoras**
-- Limite o número de threads gestoras ao máximo de sessões simultâneas permitidas.
-- Considere um limite prático, como 8 threads gestoras.
-
----
-
-IMPORTANTE:
-
-o server/kvs. tem de ter 2 pools de tarefas, uma pool com varias tarefas que leem e processam os ficheiros .job na pasta jobs dada. Na outra pool de tarefas(Pool de Tarefas gestoras), Cada thread neste conjunto fica responsável por atender aos pedidos (subscribe, unsubscribe e disconnect) de um cliente que se tenha registado, o que implica ler da sua FIFO de pedido e escrever na sua FIFO de resposta.
+O server/kvs tem de ter 2 pools de tarefas, uma pool com varias tarefas que leem e processam os ficheiros .job na pasta jobs dada. Na outra pool de tarefas(Pool de Tarefas gestoras) em que funciona atraves de um buffer produtor-consumidor, Cada thread neste conjunto fica responsável por atender aos pedidos (subscribe, unsubscribe e disconnect) de um cliente que se tenha registado, o que implica ler da sua FIFO de pedido e escrever na sua FIFO de resposta.
 Isto significa que o número total de threads gestoras será igual ao número máximo de sessões que o teu servidor vai permitir simultaneamente.
 
 A ideia é que o cliente utilize apenas duas threads. Uma lê do stdin os comandos, envia-os ao servidor e recebe a resposta. A outra é responsável por ler da fifo de notificações e por printar as notificações para o stdout.
+
+Nesta etapa, a solução composta até ao momento deve ser estendida para suportar os
+seguintes aspetos mais avançados.
+Por um lado, o servidor deve passar a suportar múltiplas sessões ativas em simultâneo (ou
+seja, S>1).
+Por outro lado, o servidor deve ser capaz de tratar pedidos de sessões distintas (ou seja, de
+clientes distintos) em paralelo, usando múltiplas tarefas (threads), entre as quais:
+● Uma das tarefas do servidor deve ficar responsável por receber os pedidos que
+chegam ao servidor através do seu pipe, sendo por isso chamada a tarefa anfitriã.
+● Existem também S tarefas gestoras que gerem os pedidos de subscrição, cada uma
+associada a um cliente e dedicada a servir os pedidos do cliente correspondente a
+esta sessão. As tarefas gestoras devem ser criadas aquando da inicialização do
+servidor. Note-se que estas tarefas são independentes das necessárias para ler os
+ficheiros com comandos e executá-los.
+A tarefa anfitriã coordena-se com as tarefas que gerem os pedidos de subscrição da
+seguinte forma:
+● Quando a tarefa anfitriã recebe um pedido de estabelecimento de sessão por um
+cliente, a tarefa anfitriã insere o pedido num buffer produtor-consumidor. As tarefas
+gestoras extraem pedidos deste buffer e comunicam com o respectivo cliente
+através dos named pipes que o cliente terá previamente criado e comunicado junto
+ao pedido de estabelecimento da sessão. A sincronização do buffer
+produtor-consumidor deve basear-se em semáforos (além de mutexes).
