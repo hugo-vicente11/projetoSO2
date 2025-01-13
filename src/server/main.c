@@ -21,15 +21,13 @@
 #include "operations.h"
 #include "parser.h"
 
-#define BUFFER_SIZE MAX_SESSION_COUNT
-
 typedef struct {
-    char req_pipe_path[40];
-    char resp_pipe_path[40];
-    char notif_pipe_path[40];
+    char req_pipe_path[MAX_PIPE_PATH_LENGTH];
+    char resp_pipe_path[MAX_PIPE_PATH_LENGTH];
+    char notif_pipe_path[MAX_PIPE_PATH_LENGTH];
 } ConnectionRequest;
 
-ConnectionRequest buffer[BUFFER_SIZE];
+ConnectionRequest buffer[MAX_SESSION_COUNT];
 static pthread_t job_thread;
 
 struct SharedData {
@@ -39,9 +37,9 @@ struct SharedData {
 };
 
 struct SessionData {
-  char req_pipe_path[40];
-  char resp_pipe_path[40];
-  char notif_pipe_path[40];
+  char req_pipe_path[MAX_PIPE_PATH_LENGTH];
+  char resp_pipe_path[MAX_PIPE_PATH_LENGTH];
+  char notif_pipe_path[MAX_PIPE_PATH_LENGTH];
   int req_fd;
   int resp_fd;
   int notif_fd;
@@ -94,10 +92,11 @@ static int entry_files(const char *dir, struct dirent *entry, char *in_path,
 }
 
 void handle_sigusr1(int sig) {
-  (void) sig;
-  pthread_mutex_lock(&buffer_mutex);
+  (void) sig; // Ignorar o parâmetro sig
+  pthread_mutex_lock(&buffer_mutex); // Bloquear o mutex para proteger a seção crítica
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     if (sessions[i].active) {
+      // Fechar pipes da sessão ativa
       close(sessions[i].req_fd);
       close(sessions[i].resp_fd);
       close(sessions[i].notif_fd);
@@ -105,7 +104,7 @@ void handle_sigusr1(int sig) {
       sessions[i].num_subscribed_keys = 0; // Remover todas as subscrições
     }
   }
-  pthread_mutex_unlock(&buffer_mutex);
+  pthread_mutex_unlock(&buffer_mutex); // Desbloquear o mutex
 }
 
 void notify_clients(const char *key, const char *value) {
@@ -114,9 +113,11 @@ void notify_clients(const char *key, const char *value) {
       for (int j = 0; j < sessions[i].num_subscribed_keys; j++) {
         if (strcmp(sessions[i].subscribed_keys[j], key) == 0) {
           if (sessions[i].notif_fd != -1) {
-            char message[2 * 41];
-            snprintf(message, 41, "%s", key);
-            snprintf(message + 41, 41, "%s", value);
+            // Preparar mensagem de notificação
+            char message[2 * (MAX_STRING_SIZE+1)];
+            snprintf(message, (MAX_STRING_SIZE+1), "%s", key);
+            snprintf(message + (MAX_STRING_SIZE+1), (MAX_STRING_SIZE+1), "%s", value);
+            // Enviar notificação ao cliente
             if (write(sessions[i].notif_fd, message, sizeof(message)) == -1) {
               perror("Failed to write notification");
             }
@@ -258,6 +259,7 @@ static void handle_session(void *arg) {
     sigaddset(&set, SIGUSR1);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
+    // Abrir pipes da sessão
     session->req_fd = open(session->req_pipe_path, O_RDONLY);
     session->resp_fd = open(session->resp_pipe_path, O_WRONLY);
     session->notif_fd = open(session->notif_pipe_path, O_WRONLY);
@@ -280,7 +282,7 @@ static void handle_session(void *arg) {
 
     session->num_subscribed_keys = 0;
 
-    char local_buffer[41]; // Renomear para evitar sombreamento
+    char local_buffer[MAX_PIPE_PATH_LENGTH+1]; // Renomear para evitar sombreamento
     while (session->active) {
         ssize_t bytes_read = read(session->req_fd, local_buffer, sizeof(local_buffer));
         if (bytes_read == -1) {
@@ -415,8 +417,6 @@ static void *get_file(void *arguments) {
       fprintf(stderr, "Thread failed to lock directory_mutex\n");
       return NULL;
     }
-    // REMOVER ANTES DE ENVIAR
-    run_job(STDIN_FILENO, STDOUT_FILENO, "stdin");
   }
 
   if (pthread_mutex_unlock(&thread_data->directory_mutex) != 0) {
@@ -466,7 +466,7 @@ static void dispatch_threads(DIR *dir) {
 
 static void *job_dispatcher(void *arg) {
     DIR *dir = (DIR *)arg;
-    dispatch_threads(dir);
+    dispatch_threads(dir); // Despachar threads para processar jobs
     return NULL;
 }
 
@@ -482,7 +482,7 @@ void *host_task(void *arg) {
     sigaction(SIGUSR1, &sa, NULL);
 
     while (1) {
-        char read_buffer[1 + 3 * 40];
+        char read_buffer[1 + 3 * MAX_PIPE_PATH_LENGTH];
         ssize_t bytes_read = read(register_fd, read_buffer, sizeof(read_buffer));
         if (bytes_read <= 0) {
             if (bytes_read == -1) {
@@ -492,14 +492,14 @@ void *host_task(void *arg) {
         }
 
         if (read_buffer[0] == OP_CODE_CONNECT) {
-            sem_wait(&semEmpty);
-            pthread_mutex_lock(&buffer_mutex);
+            sem_wait(&semEmpty); // Esperar por espaço no buffer
+            pthread_mutex_lock(&buffer_mutex); // Bloquear o mutex para proteger o buffer
             sem_getvalue(&semFull, &index);
-            strncpy(buffer[index].req_pipe_path, read_buffer + 1, 40);
-            strncpy(buffer[index].resp_pipe_path, read_buffer + 41, 40);
-            strncpy(buffer[index].notif_pipe_path, read_buffer + 81, 40);
-            pthread_mutex_unlock(&buffer_mutex);
-            sem_post(&semFull);
+            strncpy(buffer[index].req_pipe_path, read_buffer + 1, MAX_PIPE_PATH_LENGTH);
+            strncpy(buffer[index].resp_pipe_path, read_buffer + (MAX_PIPE_PATH_LENGTH+1), MAX_PIPE_PATH_LENGTH);
+            strncpy(buffer[index].notif_pipe_path, read_buffer + (2*MAX_PIPE_PATH_LENGTH+1), MAX_PIPE_PATH_LENGTH);
+            pthread_mutex_unlock(&buffer_mutex); // Desbloquear o mutex
+            sem_post(&semFull); // Sinalizar que há um item no buffer
         }
     }
     return NULL;
@@ -509,14 +509,14 @@ void *manager_task(void *arg) {
     (void)arg; // Ignorar o parâmetro não utilizado
     int index;
     while (1) {
-        sem_wait(&semFull);
-        pthread_mutex_lock(&buffer_mutex);
+        sem_wait(&semFull); // Esperar por um item no buffer
+        pthread_mutex_lock(&buffer_mutex); // Bloquear o mutex para proteger o buffer
         sem_getvalue(&semFull, &index);
         ConnectionRequest request = buffer[index];
-        pthread_mutex_unlock(&buffer_mutex);
-        sem_post(&semEmpty);
+        pthread_mutex_unlock(&buffer_mutex); // Desbloquear o mutex
+        sem_post(&semEmpty); // Sinalizar que há espaço no buffer
 
-        // Handle the connection request
+        // Lidar com o pedido de conexão
         int session_index = -1;
         for (int i = 0; i < MAX_SESSION_COUNT; i++) {
             if (!sessions[i].active) {
@@ -526,12 +526,13 @@ void *manager_task(void *arg) {
         }
 
         if (session_index != -1) {
-            strncpy(sessions[session_index].req_pipe_path, request.req_pipe_path, 40);
-            strncpy(sessions[session_index].resp_pipe_path, request.resp_pipe_path, 40);
-            strncpy(sessions[session_index].notif_pipe_path, request.notif_pipe_path, 40);
+            // Configurar a sessão com os caminhos dos pipes
+            strncpy(sessions[session_index].req_pipe_path, request.req_pipe_path, MAX_PIPE_PATH_LENGTH);
+            strncpy(sessions[session_index].resp_pipe_path, request.resp_pipe_path, MAX_PIPE_PATH_LENGTH);
+            strncpy(sessions[session_index].notif_pipe_path, request.notif_pipe_path, MAX_PIPE_PATH_LENGTH);
             sessions[session_index].active = 1;
 
-            handle_session(&sessions[session_index]);
+            handle_session(&sessions[session_index]); // Iniciar a sessão
         }
     }
     return NULL;
@@ -576,7 +577,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  unlink(register_pipe_path);
+  unlink(register_pipe_path); // Remover pipe de registo existente
 
   if (mkfifo(register_pipe_path, 0666) == -1) {
     perror("Failed to create register pipe");
@@ -589,6 +590,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  // Criar thread para despachar jobs
   if (pthread_create(&job_thread, NULL, job_dispatcher, (void *)dir) != 0) {
     perror("Failed to create job dispatcher thread");
     return 1;
@@ -610,11 +612,13 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Criar thread para gerir conexões de clientes
   if (pthread_create(&host_thread, NULL, host_task, &register_fd) != 0) {
     perror("Failed to create host thread");
     return 1;
   }
 
+  // Criar threads para gerir sessões
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     if (pthread_create(&manager_threads[i], NULL, manager_task, NULL) != 0) {
       perror("Failed to create manager thread");
@@ -633,8 +637,9 @@ int main(int argc, char **argv) {
   }
 
   close(register_fd);
-  unlink(register_pipe_path);
+  unlink(register_pipe_path); // Remover pipe de registo
 
+  // Esperar que todos os backups terminem
   while (active_backups > 0) {
     wait(NULL);
     active_backups--;

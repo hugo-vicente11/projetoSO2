@@ -15,8 +15,9 @@ int interrompido = 0;
 
 void *notification_thread(void *arg) {
   int notif_pipe = *(int *)arg;
-  char buffer[2 * 41];
+  char buffer[2 * (MAX_STRING_SIZE+1)];
   while (1) {
+    // Ler notificação do pipe
     int result = read_all(notif_pipe, buffer, sizeof(buffer), NULL);
     if (result <= 0) {
       interrompido = 1;
@@ -24,11 +25,13 @@ void *notification_thread(void *arg) {
       fprintf(stderr,"Failed to read notification");
       pthread_exit(NULL);
     }
-    char key[41], value[41];
-    strncpy(key, buffer, 40);
-    key[40] = '\0';
-    strncpy(value, buffer + 41, 40);
-    value[40] = '\0';
+    // Extrair chave e valor da notificação
+    char key[(MAX_STRING_SIZE+1)], value[(MAX_STRING_SIZE+1)];
+    strncpy(key, buffer, MAX_STRING_SIZE);
+    key[MAX_STRING_SIZE] = '\0';
+    strncpy(value, buffer + (MAX_STRING_SIZE+1), MAX_STRING_SIZE);
+    value[MAX_STRING_SIZE] = '\0';
+    // Imprimir chave e valor
     printf("(%s,%s)\n", key, value);
   }
 
@@ -42,25 +45,28 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  char req_pipe_path[256];
-  char resp_pipe_path[256];
-  char notif_pipe_path[256];
+  char req_pipe_path[MAX_PIPE_PATH_LENGTH];
+  char resp_pipe_path[MAX_PIPE_PATH_LENGTH];
+  char notif_pipe_path[MAX_PIPE_PATH_LENGTH];
 
-  snprintf(req_pipe_path, sizeof(req_pipe_path), "/tmp/req_%s", argv[1]);
-  snprintf(resp_pipe_path, sizeof(resp_pipe_path), "/tmp/resp_%s", argv[1]);
-  snprintf(notif_pipe_path, sizeof(notif_pipe_path), "/tmp/notif_%s", argv[1]);
+  // Construir caminhos dos pipes
+  snprintf(req_pipe_path, MAX_PIPE_PATH_LENGTH, "/tmp/req_%s", argv[1]);
+  snprintf(resp_pipe_path, MAX_PIPE_PATH_LENGTH, "/tmp/resp_%s", argv[1]);
+  snprintf(notif_pipe_path, MAX_PIPE_PATH_LENGTH, "/tmp/notif_%s", argv[1]);
 
   char keys[MAX_NUMBER_SUB][MAX_STRING_SIZE] = {0};
   unsigned int delay_ms;
   size_t num;
 
   int notif_pipe;
+  // Conectar ao servidor
   int response_code = kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path, &notif_pipe);
   if (response_code != 0) {
     fprintf(stderr, "Failed to connect to the server\n");
     return 1;
   }
   
+  // Criar thread para notificações
   pthread_t notif_thread;
   if (pthread_create(&notif_thread, NULL, notification_thread, &notif_pipe) != 0) {
     perror("Failed to create notification thread");
@@ -73,6 +79,7 @@ int main(int argc, char *argv[]) {
     }
     switch (get_next(STDIN_FILENO)) {
     case CMD_DISCONNECT:
+        // Desconectar do servidor
         response_code = kvs_disconnect();
         if (response_code != 0) {
             fprintf(stderr, "Failed to disconnect to the server\n");
@@ -83,6 +90,7 @@ int main(int argc, char *argv[]) {
         return 0;
 
     case CMD_SUBSCRIBE:
+        // Processar comando de subscrição
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -94,6 +102,7 @@ int main(int argc, char *argv[]) {
         break;
 
     case CMD_UNSUBSCRIBE:
+        // Processar comando de cancelamento de subscrição
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -105,6 +114,7 @@ int main(int argc, char *argv[]) {
         break;
 
     case CMD_DELAY:
+        // Processar comando de atraso
         if (parse_delay(STDIN_FILENO, &delay_ms) == -1) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
             continue;
