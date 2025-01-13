@@ -11,24 +11,26 @@
 #include "src/common/constants.h"
 #include "src/common/io.h"
 
+int interrompido = 0;
+
 void *notification_thread(void *arg) {
   int notif_pipe = *(int *)arg;
   char buffer[2 * 41];
-
   while (1) {
-    ssize_t bytes_read = read(notif_pipe, buffer, sizeof(buffer));
-    if (bytes_read > 0) {
-      char key[41], value[41];
-      strncpy(key, buffer, 40);
-      key[40] = '\0';
-      strncpy(value, buffer + 41, 40);
-      value[40] = '\0';
-      printf("Debug: Received notification: key=%s, value=%s\n", key, value);
-      printf("(%s,%s)\n", key, value);
-    } else if (bytes_read == -1 && errno != EAGAIN) {
-      perror("Failed to read from notification pipe");
-      break;
+    int result = read_all(notif_pipe, buffer, sizeof(buffer), NULL);
+    printf("DEBUG: RESULT = %d\n", result);
+    if (result <= 0) {
+      interrompido = 1;
+      perror("Failed to read notification");
+      pthread_exit(NULL);
     }
+    char key[41], value[41];
+    strncpy(key, buffer, 40);
+    key[40] = '\0';
+    strncpy(value, buffer + 41, 40);
+    value[40] = '\0';
+    printf("Debug: Received notification: key=%s, value=%s\n", key, value);
+    printf("(%s,%s)\n", key, value);
   }
 
   return NULL;
@@ -60,15 +62,6 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  
-
-  // Open the notification pipe
-  notif_pipe = open(notif_pipe_path, O_RDONLY | O_NONBLOCK);
-  if (notif_pipe == -1) {
-    perror("Failed to open notification pipe");
-    return 1;
-  }
-
   printf("Debug: Notification pipe opened successfully\n");
   
   pthread_t notif_thread;
@@ -78,6 +71,9 @@ int main(int argc, char *argv[]) {
   }
 
   while (1) {
+    if (interrompido) {
+      return 1;
+    }
     switch (get_next(STDIN_FILENO)) {
     case CMD_DISCONNECT:
         printf("Debug: Received CMD_DISCONNECT\n");

@@ -3,6 +3,10 @@
 		"constants.h": "c",
 		"types.h": "c",
 		"api.h": "c",
-		"wait.h": "c"
+		"wait.h": "c",
+		"parser.h": "c",
+		"protocol.h": "c",
+		"fcntl.h": "c",
+		"signal.h": "c"
 	}
 }

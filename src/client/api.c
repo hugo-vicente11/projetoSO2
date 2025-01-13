@@ -14,6 +14,7 @@ static char global_resp_pipe_path[MAX_PIPE_PATH_LENGTH];
 static char global_notif_pipe_path[MAX_PIPE_PATH_LENGTH];
 static int req_fd = -1;
 static int resp_fd = -1;
+static int notif_fd = -1;
 
 int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
                 char const *server_pipe_path, char const *notif_pipe_path,
@@ -52,12 +53,24 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
 
   close(server_fd);
 
+
+  req_fd = open(global_req_pipe_path, O_WRONLY);
+  if (req_fd == -1) {
+    perror("Failed to open request pipe");
+    return 1;
+  }
   printf("Debug: Waiting for server response on %s\n", resp_pipe_path);
   resp_fd = open(global_resp_pipe_path, O_RDONLY);
   if (resp_fd == -1) {
     perror("Failed to open response pipe");
     return 1;
   }
+  notif_fd = open(global_notif_pipe_path, O_RDONLY);
+  if (notif_fd == -1) {
+    perror("Failed to open notification pipe");
+    return 1;
+  }
+  *notif_pipe = notif_fd;
   printf("PAREI DE ESPERAR\n");
   char response[2];
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
@@ -71,12 +84,6 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
   printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
   printf("Server returned %d for operation: connect\n", response[1]);
-
-  *notif_pipe = open(notif_pipe_path, O_RDONLY | O_NONBLOCK);
-  if (*notif_pipe == -1) {
-    perror("Failed to open notification pipe");
-    return 1;
-  }
 
   return response[1];
 }
