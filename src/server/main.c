@@ -30,8 +30,6 @@ typedef struct {
 } ConnectionRequest;
 
 ConnectionRequest buffer[BUFFER_SIZE];
-volatile sig_atomic_t sigusr1_received = 0;
-
 static pthread_t job_thread;
 
 struct SharedData {
@@ -48,7 +46,6 @@ struct SessionData {
   int resp_fd;
   int notif_fd;
   int active;
-  pthread_t thread;
   char subscribed_keys[MAX_NUMBER_SUB][MAX_STRING_SIZE];
   int num_subscribed_keys;
 };
