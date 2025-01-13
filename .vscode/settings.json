@@ -8,6 +8,8 @@
 		"protocol.h": "c",
 		"fcntl.h": "c",
 		"signal.h": "c",
-		"io.h": "c"
+		"io.h": "c",
+		"stdio.h": "c",
+		"string.h": "c"
 	}
 }

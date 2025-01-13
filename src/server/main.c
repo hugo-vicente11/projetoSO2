@@ -21,6 +21,9 @@
 #include "operations.h"
 #include "parser.h"
 
+// Variável global para indicar se SIGUSR1 foi recebido
+volatile sig_atomic_t sigusr1_received = 0;
+
 typedef struct {
     char req_pipe_path[MAX_PIPE_PATH_LENGTH];
     char resp_pipe_path[MAX_PIPE_PATH_LENGTH];
@@ -93,18 +96,7 @@ static int entry_files(const char *dir, struct dirent *entry, char *in_path,
 
 void handle_sigusr1(int sig) {
   (void) sig; // Ignorar o parâmetro sig
-  pthread_mutex_lock(&buffer_mutex); // Bloquear o mutex para proteger a seção crítica
-  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-    if (sessions[i].active) {
-      // Fechar pipes da sessão ativa
-      close(sessions[i].req_fd);
-      close(sessions[i].resp_fd);
-      close(sessions[i].notif_fd);
-      sessions[i].active = 0;
-      sessions[i].num_subscribed_keys = 0; // Remover todas as subscrições
-    }
-  }
-  pthread_mutex_unlock(&buffer_mutex); // Desbloquear o mutex
+  sigusr1_received = 1; // Indicar que SIGUSR1 foi recebido
 }
 
 void notify_clients(const char *key, const char *value) {
@@ -471,18 +463,35 @@ static void *job_dispatcher(void *arg) {
 }
 
 void *host_task(void *arg) {
-    int register_fd = *(int *)arg;
-    int index;
+  int register_fd = *(int *)arg;
+  int index;
 
-    // Configurar o tratamento de sinal
-    struct sigaction sa;
-    sa.sa_handler = handle_sigusr1;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGUSR1, &sa, NULL);
+  // Configurar o tratamento de sinal
+  struct sigaction sa;
+  sa.sa_handler = handle_sigusr1;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGUSR1, &sa, NULL);
 
-    while (1) {
-        char read_buffer[1 + 3 * MAX_PIPE_PATH_LENGTH];
+  while (1) {
+    if (sigusr1_received) {
+      pthread_mutex_lock(&buffer_mutex); // Bloquear o mutex para proteger a seção crítica
+      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (sessions[i].active) {
+          // Fechar pipes da sessão ativa
+          close(sessions[i].req_fd);
+          close(sessions[i].resp_fd);
+          close(sessions[i].notif_fd);
+          sessions[i].active = 0;
+          sessions[i].num_subscribed_keys = 0; // Remover todas as subscrições
+        }
+      }
+      pthread_mutex_unlock(&buffer_mutex); // Desbloquear o mutex
+      sigusr1_received = 0; // Resetar a variável global
+    }
+
+    // Lógica existente do host_task
+    char read_buffer[1 + 3 * MAX_PIPE_PATH_LENGTH];
         ssize_t bytes_read = read(register_fd, read_buffer, sizeof(read_buffer));
         if (bytes_read <= 0) {
             if (bytes_read == -1) {
@@ -502,7 +511,6 @@ void *host_task(void *arg) {
             sem_post(&semFull); // Sinalizar que há um item no buffer
         }
     }
-    return NULL;
 }
 
 void *manager_task(void *arg) {
