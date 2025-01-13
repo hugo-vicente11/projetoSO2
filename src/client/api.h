@@ -30,5 +30,6 @@ int kvs_subscribe(const char *key);
 /// and was removed), 1 otherwise.
 
 int kvs_unsubscribe(const char *key);
+int kvs_end(void);
 
 #endif // CLIENT_API_H

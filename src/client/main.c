@@ -21,6 +21,7 @@ void *notification_thread(void *arg) {
     printf("DEBUG: RESULT = %d\n", result);
     if (result <= 0) {
       interrompido = 1;
+      kvs_end();
       perror("Failed to read notification");
       pthread_exit(NULL);
     }

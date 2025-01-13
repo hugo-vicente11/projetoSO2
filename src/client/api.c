@@ -140,8 +140,10 @@ int kvs_disconnect(void) {
 
   close(req_fd);
   close(resp_fd);
+  close(notif_fd);
   req_fd = -1;
   resp_fd = -1;
+  notif_fd = -1;
 
   unlink(global_req_pipe_path);
   unlink(global_resp_pipe_path);
@@ -254,5 +256,19 @@ int kvs_unsubscribe(const char *key) {
   }
 
   printf("Server returned %d for operation: unsubscribe\n", response[1]);
+  return 0;
+}
+
+int kvs_end(void) {
+  
+  close(req_fd);
+  close(resp_fd);
+  close(notif_fd);
+
+  unlink(global_req_pipe_path);
+  unlink(global_resp_pipe_path);
+  unlink(global_notif_pipe_path);
+
+  printf("Debug: Disconnected successfully\n");
   return 0;
 }
