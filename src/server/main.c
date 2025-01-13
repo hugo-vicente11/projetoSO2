@@ -98,9 +98,6 @@ static int entry_files(const char *dir, struct dirent *entry, char *in_path,
 
 void handle_sigusr1(int sig) {
   (void) sig;
-  printf("Debug: RECEBI O SINAL!\n");
-
-  // Eliminar todas as subscrições e encerrar os FIFOs
   pthread_mutex_lock(&buffer_mutex);
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     if (sessions[i].active) {
@@ -112,31 +109,20 @@ void handle_sigusr1(int sig) {
     }
   }
   pthread_mutex_unlock(&buffer_mutex);
-  printf("Debug: Sessões terminadas\n");
 }
 
 void notify_clients(const char *key, const char *value) {
-  printf("Debug: Notifying clients about key: %s, value: %s\n", key, value);
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-    printf("Debug: Checking session %d, active: %d, num_subscribed_keys: %d\n", i, sessions[i].active, sessions[i].num_subscribed_keys);
     if (sessions[i].active) {
       for (int j = 0; j < sessions[i].num_subscribed_keys; j++) {
-        printf("Debug: Comparing subscribed key: %s with changed key: %s\n", sessions[i].subscribed_keys[j], key);
         if (strcmp(sessions[i].subscribed_keys[j], key) == 0) {
-          printf("Debug: Client %d subscribed to key: %s\n", i, key);
-          printf("Debug: Trying to open notification pipe: %s\n", sessions[i].notif_pipe_path);
-          int notif_fd = sessions[i].notif_fd;
-          if (notif_fd != -1) {
-            printf("CONSEGUI ABRIR O PIPE DE NOTIS DESTA SESSAO!\n");
+          if (sessions[i].notif_fd != -1) {
             char message[2 * 41];
             snprintf(message, 41, "%s", key);
             snprintf(message + 41, 41, "%s", value);
-            if (write(notif_fd, message, sizeof(message)) == -1) {
+            if (write(sessions[i].notif_fd, message, sizeof(message)) == -1) {
               perror("Failed to write notification");
-            } else {
-              printf("Debug: Notification sent to client %d\n", i);
             }
-            close(notif_fd);
           } else {
             perror("Failed to open notification pipe");
           }
@@ -274,7 +260,7 @@ static void handle_session(void *arg) {
     sigemptyset(&set);
     sigaddset(&set, SIGUSR1);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
-    printf("Debug: NOTIF PIPE: %s\n", session->notif_pipe_path);
+
     session->req_fd = open(session->req_pipe_path, O_RDONLY);
     session->resp_fd = open(session->resp_pipe_path, O_WRONLY);
     session->notif_fd = open(session->notif_pipe_path, O_WRONLY);
@@ -300,17 +286,10 @@ static void handle_session(void *arg) {
     char local_buffer[41]; // Renomear para evitar sombreamento
     while (session->active) {
         ssize_t bytes_read = read(session->req_fd, local_buffer, sizeof(local_buffer));
-        if (bytes_read <= 0) {
-            if (bytes_read == 0) {
-                printf("Debug: Request pipe closed by client\n");
-            } else {
-                perror("Failed to read from request pipe");
-            }
+        if (bytes_read == -1) {
+            perror("Failed to read from request pipe");
             break;
         }
-
-        printf("Debug: Read %zd bytes from request pipe\n", bytes_read);
-        printf("Debug: Received message: OP_CODE=%d, key=%s\n", local_buffer[0], local_buffer + 1);
 
         response[0] = local_buffer[0];
         response[1] = 1;
@@ -321,22 +300,16 @@ static void handle_session(void *arg) {
             strncpy(key, local_buffer + 1, MAX_STRING_SIZE - 1);
             key[MAX_STRING_SIZE - 1] = '\0';
 
-            printf("Debug: Checking if key exists: %s\n", key);
-            // Verificar se a chave existe na hashtable
             if (kvs_key_exists(key)) {
-                // Adicionar a chave à lista de chaves subscritas
                 if (session->num_subscribed_keys < MAX_NUMBER_SUB) {
                     strncpy(session->subscribed_keys[session->num_subscribed_keys], key, MAX_STRING_SIZE);
                     session->num_subscribed_keys++;
                     response[1] = 1; // Key exists
-                    printf("Debug: Subscribed to key: %s\n", key);
-                    printf("Debug: Total subscribed keys: %d\n", session->num_subscribed_keys);
                 } else {
-                    printf("Debug: Maximum number of subscriptions reached\n");
+                    fprintf(stderr, "Maximum number of subscriptions reached\n");
                 }
             } else {
                 response[1] = 0; // Key does not exist
-                printf("Debug: Key does not exist: %s\n", key);
             }
 
             break;
@@ -346,7 +319,6 @@ static void handle_session(void *arg) {
             strncpy(key, local_buffer + 1, MAX_STRING_SIZE - 1);
             key[MAX_STRING_SIZE - 1] = '\0';
 
-            // Remover a chave da lista de chaves subscritas
             int found = 0;
             for (int i = 0; i < session->num_subscribed_keys; i++) {
                 if (strcmp(session->subscribed_keys[i], key) == 0) {
@@ -356,20 +328,17 @@ static void handle_session(void *arg) {
                     session->num_subscribed_keys--;
                     response[1] = 0; // Success
                     found = 1;
-                    printf("Debug: Unsubscribed from key: %s\n", key);
-                    printf("Debug: Total subscribed keys: %d\n", session->num_subscribed_keys);
                     break;
                 }
             }
             if (!found) {
                 response[1] = 1;
-                printf("Debug: Subscription did not exist for key: %s\n", key);
             }
-
             break;
         }
         case OP_CODE_DISCONNECT:
             session->active = 0;
+            session->num_subscribed_keys = 0; // Remover todas as subscrições
             response[1] = 0; // Success
             break;
         default:
@@ -381,13 +350,7 @@ static void handle_session(void *arg) {
             perror("Failed to write response to response pipe");
             break;
         }
-
-        printf("Debug: Sent response: OP_CODE=%d, result=%d\n", response[0], response[1]);
     }
-
-    //close(session->req_fd);
-    //close(session->resp_fd);
-    //close(session->notif_fd);
 
     // Marcar a sessão como inativa e notificar a thread gestora
     pthread_mutex_lock(&buffer_mutex);
@@ -488,8 +451,6 @@ static void dispatch_threads(DIR *dir) {
     }
   }
 
-  // ler do FIFO de registo
-
   for (unsigned int i = 0; i < max_threads; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
       fprintf(stderr, "Failed to join thread %u\n", i);
@@ -540,7 +501,6 @@ void *host_task(void *arg) {
             strncpy(buffer[index].req_pipe_path, read_buffer + 1, 40);
             strncpy(buffer[index].resp_pipe_path, read_buffer + 41, 40);
             strncpy(buffer[index].notif_pipe_path, read_buffer + 81, 40);
-
             pthread_mutex_unlock(&buffer_mutex);
             sem_post(&semFull);
         }
@@ -556,7 +516,6 @@ void *manager_task(void *arg) {
         pthread_mutex_lock(&buffer_mutex);
         sem_getvalue(&semFull, &index);
         ConnectionRequest request = buffer[index];
-
         pthread_mutex_unlock(&buffer_mutex);
         sem_post(&semEmpty);
 
@@ -574,7 +533,6 @@ void *manager_task(void *arg) {
             strncpy(sessions[session_index].resp_pipe_path, request.resp_pipe_path, 40);
             strncpy(sessions[session_index].notif_pipe_path, request.notif_pipe_path, 40);
             sessions[session_index].active = 1;
-
 
             handle_session(&sessions[session_index]);
         }
@@ -616,29 +574,24 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  printf("Debug: Initializing KVS\n");
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
   }
 
-  printf("Debug: Unlinking register pipe path\n");
   unlink(register_pipe_path);
 
-  printf("Debug: Creating register pipe\n");
   if (mkfifo(register_pipe_path, 0666) == -1) {
     perror("Failed to create register pipe");
     return 1;
   }
 
-  printf("Debug: Opening jobs directory\n");
   DIR *dir = opendir(argv[1]);
   if (dir == NULL) {
     fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
     return 0;
   }
 
-  // Dispara thread para tratar dos .job
   if (pthread_create(&job_thread, NULL, job_dispatcher, (void *)dir) != 0) {
     perror("Failed to create job dispatcher thread");
     return 1;
@@ -654,7 +607,6 @@ int main(int argc, char **argv) {
   pthread_t host_thread;
   pthread_t manager_threads[MAX_SESSION_COUNT];
 
-  printf("Debug: Opening register pipe\n");
   int register_fd = open(register_pipe_path, O_RDONLY);
   if (register_fd == -1) {
     perror("Failed to open register pipe");

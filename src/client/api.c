@@ -53,13 +53,12 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
 
   close(server_fd);
 
-
   req_fd = open(global_req_pipe_path, O_WRONLY);
   if (req_fd == -1) {
     perror("Failed to open request pipe");
     return 1;
   }
-  printf("Debug: Waiting for server response on %s\n", resp_pipe_path);
+
   resp_fd = open(global_resp_pipe_path, O_RDONLY);
   if (resp_fd == -1) {
     perror("Failed to open response pipe");
@@ -71,7 +70,7 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
     return 1;
   }
   *notif_pipe = notif_fd;
-  printf("PAREI DE ESPERAR\n");
+
   char response[2];
   ssize_t bytes_read = read(resp_fd, response, sizeof(response));
   if (bytes_read == -1) {
@@ -80,8 +79,6 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
     resp_fd = -1;
     return 1;
   }
-  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
-  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
   printf("Server returned %d for operation: connect\n", response[1]);
 
@@ -89,37 +86,12 @@ int kvs_connect(char const *req_pipe_path, char const *resp_pipe_path,
 }
 
 int kvs_disconnect(void) {
-  printf("Debug: kvs_disconnect called\n");
-
-  // Abrir o req_fd se ainda não estiver aberto
-  if (req_fd == -1) {
-    req_fd = open(global_req_pipe_path, O_WRONLY);
-    if (req_fd == -1) {
-      perror("Failed to open request pipe");
-      return 1;
-    }
-    printf("Debug: Request pipe opened successfully\n");
-  }
-
   char message[1];
   message[0] = OP_CODE_DISCONNECT;
-
-  printf("Debug: Sending disconnect message: OP_CODE=%d\n", message[0]);
 
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send disconnect message");
     return 1;
-  }
-  printf("Debug: Disconnect message sent successfully\n");
-
-  // Abrir o resp_fd se ainda não estiver aberto
-  if (resp_fd == -1) {
-    resp_fd = open(global_resp_pipe_path, O_RDONLY);
-    if (resp_fd == -1) {
-      perror("Failed to open response pipe");
-      return 1;
-    }
-    printf("Debug: Response pipe opened successfully\n");
   }
 
   char response[2];
@@ -128,8 +100,6 @@ int kvs_disconnect(void) {
     perror("Failed to read disconnect response");
     return 1;
   }
-  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
-  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
   printf("Server returned %d for operation: disconnect\n", response[1]);
 
@@ -149,43 +119,17 @@ int kvs_disconnect(void) {
   unlink(global_resp_pipe_path);
   unlink(global_notif_pipe_path);
 
-  printf("Debug: Disconnected successfully\n");
   return 0;
 }
 
 int kvs_subscribe(const char *key) {
-  printf("Debug: kvs_subscribe called with key: %s\n", key);
-
-  // Abrir o req_fd se ainda não estiver aberto
-  if (req_fd == -1) {
-    req_fd = open(global_req_pipe_path, O_WRONLY);
-    if (req_fd == -1) {
-      perror("Failed to open request pipe");
-      return 1;
-    }
-    printf("Debug: Request pipe opened successfully\n");
-  }
-
   char message[1 + 40];
   message[0] = OP_CODE_SUBSCRIBE;
   snprintf(message + 1, 40, "%s", key);
 
-  printf("Debug: Sending subscribe message: OP_CODE=%d, key=%s\n", message[0], message + 1);
-
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send subscribe message");
     return 1;
-  }
-  printf("Debug: Subscribe message sent successfully\n");
-
-  // Abrir o resp_fd se ainda não estiver aberto
-  if (resp_fd == -1) {
-    resp_fd = open(global_resp_pipe_path, O_RDONLY);
-    if (resp_fd == -1) {
-      perror("Failed to open response pipe");
-      return 1;
-    }
-    printf("Debug: Response pipe opened successfully\n");
   }
 
   char response[2];
@@ -194,8 +138,6 @@ int kvs_subscribe(const char *key) {
     perror("Failed to read subscribe response");
     return 1;
   }
-  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
-  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
   if (response[1] != 0 && response[1] != 1) {
     fprintf(stderr, "Server returned an invalid response for subscribe\n");
@@ -207,38 +149,13 @@ int kvs_subscribe(const char *key) {
 }
 
 int kvs_unsubscribe(const char *key) {
-  printf("Debug: kvs_unsubscribe called with key: %s\n", key);
-
-  // Abrir o req_fd se ainda não estiver aberto
-  if (req_fd == -1) {
-    req_fd = open(global_req_pipe_path, O_WRONLY);
-    if (req_fd == -1) {
-      perror("Failed to open request pipe");
-      return 1;
-    }
-    printf("Debug: Request pipe opened successfully\n");
-  }
-
   char message[1 + 40];
   message[0] = OP_CODE_UNSUBSCRIBE;
   snprintf(message + 1, 40, "%s", key);
 
-  printf("Debug: Sending unsubscribe message: OP_CODE=%d, key=%s\n", message[0], message + 1);
-
   if (write(req_fd, message, sizeof(message)) == -1) {
     perror("Failed to send unsubscribe message");
     return 1;
-  }
-  printf("Debug: Unsubscribe message sent successfully\n");
-
-  // Abrir o resp_fd se ainda não estiver aberto
-  if (resp_fd == -1) {
-    resp_fd = open(global_resp_pipe_path, O_RDONLY);
-    if (resp_fd == -1) {
-      perror("Failed to open response pipe");
-      return 1;
-    }
-    printf("Debug: Response pipe opened successfully\n");
   }
 
   char response[2];
@@ -247,8 +164,6 @@ int kvs_unsubscribe(const char *key) {
     perror("Failed to read unsubscribe response");
     return 1;
   }
-  printf("Debug: Read %zd bytes from response pipe\n", bytes_read);
-  printf("Debug: Received response: OP_CODE=%d, result=%d\n", response[0], response[1]);
 
   if (response[1] != 0 && response[1] != 1) {
     fprintf(stderr, "Server returned an invalid response for unsubscribe\n");
@@ -260,7 +175,6 @@ int kvs_unsubscribe(const char *key) {
 }
 
 int kvs_end(void) {
-  
   close(req_fd);
   close(resp_fd);
   close(notif_fd);
@@ -269,6 +183,5 @@ int kvs_end(void) {
   unlink(global_resp_pipe_path);
   unlink(global_notif_pipe_path);
 
-  printf("Debug: Disconnected successfully\n");
   return 0;
 }

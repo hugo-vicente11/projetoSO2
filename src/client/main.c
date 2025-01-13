@@ -18,11 +18,10 @@ void *notification_thread(void *arg) {
   char buffer[2 * 41];
   while (1) {
     int result = read_all(notif_pipe, buffer, sizeof(buffer), NULL);
-    printf("DEBUG: RESULT = %d\n", result);
     if (result <= 0) {
       interrompido = 1;
       kvs_end();
-      perror("Failed to read notification");
+      fprintf(stderr,"Failed to read notification");
       pthread_exit(NULL);
     }
     char key[41], value[41];
@@ -30,7 +29,6 @@ void *notification_thread(void *arg) {
     key[40] = '\0';
     strncpy(value, buffer + 41, 40);
     value[40] = '\0';
-    printf("Debug: Received notification: key=%s, value=%s\n", key, value);
     printf("(%s,%s)\n", key, value);
   }
 
@@ -62,8 +60,6 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Failed to connect to the server\n");
     return 1;
   }
-
-  printf("Debug: Notification pipe opened successfully\n");
   
   pthread_t notif_thread;
   if (pthread_create(&notif_thread, NULL, notification_thread, &notif_pipe) != 0) {
@@ -77,7 +73,6 @@ int main(int argc, char *argv[]) {
     }
     switch (get_next(STDIN_FILENO)) {
     case CMD_DISCONNECT:
-        printf("Debug: Received CMD_DISCONNECT\n");
         response_code = kvs_disconnect();
         if (response_code != 0) {
             fprintf(stderr, "Failed to disconnect to the server\n");
@@ -85,50 +80,35 @@ int main(int argc, char *argv[]) {
         }
         pthread_cancel(notif_thread);
         pthread_join(notif_thread, NULL);
-        printf("Disconnected from server\n");
         return 0;
 
     case CMD_SUBSCRIBE:
-        printf("Debug: Received CMD_SUBSCRIBE\n");
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
             continue;
         }
-
-        printf("Debug: Subscribing to key: %s\n", keys[0]);
         if (kvs_subscribe(keys[0])) {
             fprintf(stderr, "Command subscribe failed\n");
-        } else {
-            printf("Debug: Successfully subscribed to key: %s\n", keys[0]);
         }
-
         break;
 
     case CMD_UNSUBSCRIBE:
-        printf("Debug: Received CMD_UNSUBSCRIBE\n");
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
             continue;
         }
-
-        printf("Debug: Unsubscribing from key: %s\n", keys[0]);
         if (kvs_unsubscribe(keys[0])) {
             fprintf(stderr, "Command unsubscribe failed\n");
-        } else {
-            printf("Debug: Successfully unsubscribed from key: %s\n", keys[0]);
         }
-
         break;
 
     case CMD_DELAY:
-        printf("Debug: Received CMD_DELAY\n");
         if (parse_delay(STDIN_FILENO, &delay_ms) == -1) {
             fprintf(stderr, "Invalid command. See HELP for usage\n");
             continue;
         }
-
         if (delay_ms > 0) {
             printf("Waiting...\n");
             delay(delay_ms);
