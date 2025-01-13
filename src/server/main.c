@@ -631,13 +631,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  printf("Debug: Opening register pipe\n");
-  int register_fd = open(register_pipe_path, O_RDONLY);
-  if (register_fd == -1) {
-    perror("Failed to open register pipe");
-    return 1;
-  }
-
   printf("Debug: Opening jobs directory\n");
   DIR *dir = opendir(argv[1]);
   if (dir == NULL) {
@@ -660,6 +653,13 @@ int main(int argc, char **argv) {
 
   pthread_t host_thread;
   pthread_t manager_threads[MAX_SESSION_COUNT];
+
+  printf("Debug: Opening register pipe\n");
+  int register_fd = open(register_pipe_path, O_RDONLY);
+  if (register_fd == -1) {
+    perror("Failed to open register pipe");
+    return 1;
+  }
 
   if (pthread_create(&host_thread, NULL, host_task, &register_fd) != 0) {
     perror("Failed to create host thread");
